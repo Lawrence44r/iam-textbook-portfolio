@@ -1,0 +1,51 @@
+// =========================================================================
+// KQL Rule: DCSync Attack Detection
+// Log Source: SecurityEvent (Windows Security Event Log)
+// Description: Detects Directory Service replication requests (Event 4662)
+//              using DS-Replication-Get-Changes from non-DC accounts.
+//              DCSync allows an attacker with replication rights to extract
+//              all password hashes from Active Directory (Golden Ticket path).
+// Severity: CRITICAL
+// MITRE: T1003.006 — OS Credential Dumping: DCSync
+// Chapter 10 §10.7 — Sentinel KQL Analytics Rules
+// =========================================================================
+
+// Known DC computer accounts — update for your environment or pull dynamically
+let knownDCAccounts = dynamic([
+    "DC01$", "DC02$", "DC03$", "RODC01$"  // Replace with your DC names + $
+]);
+
+// Known replication service accounts (Entra Connect, migration tools)
+let authorizedReplicators = dynamic([
+    "MSOL_XXXXXXXX",     // Entra Connect sync account — update with actual
+    "AADConnect$"        // Replace with your Entra Connect service account
+]);
+
+SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID == 4662                              // Directory Service access
+// DS-Replication-Get-Changes (1131f6aa) and DS-Replication-Get-Changes-All (1131f6ad)
+// Both are required for DCSync; detecting either is sufficient for alerting
+| where Properties has "1131f6aa" or Properties has "1131f6ad"
+| where ObjectType contains "domainDNS"             // Targeting domain root
+// Extract the account performing replication
+| extend AccountDomain   = SubjectDomainName
+| extend AccountName     = SubjectUserName
+| extend FullAccountName = strcat(AccountDomain, "\\", AccountName)
+// Filter out legitimate DC-to-DC replication (computer accounts ending in $)
+| where not(AccountName has_any(knownDCAccounts))
+| where not(AccountName has_any(authorizedReplicators))
+| where AccountName !endswith "$"                   // Exclude all computer accounts (belt-and-suspenders)
+| project
+    TimeGenerated,
+    Computer,                           // DC receiving the replication request
+    AccountName,
+    AccountDomain,
+    FullAccountName,
+    Properties,
+    EventID
+| extend
+    Alert          = strcat("[CRITICAL] DCSync: Non-DC account '", FullAccountName, "' is performing directory replication from DC '", Computer, "'"),
+    ThreatImpact   = "Attacker may be dumping all password hashes from Active Directory",
+    ImmediateAction = "1. Verify if this is authorized (pen test, migration). 2. If not: isolate source machine immediately. 3. Run Get-ADUser -Filter * -Properties PasswordLastSet to assess scope. 4. Consider krbtgt rotation if domain compromise suspected."
+| sort by TimeGenerated desc

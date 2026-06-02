@@ -1,0 +1,47 @@
+// =========================================================================
+// KQL Rule: Global or Security Admin Role Assignment
+// Log Source: AuditLogs (Entra ID Audit Logs via Sentinel connector)
+// Description: Alerts on any assignment of highly privileged directory roles.
+//              Global Admin and Security Admin assignments are Tier 0 events
+//              and should always be reviewed by the security team.
+// Severity: HIGH
+// Chapter 10 §10.7 — Sentinel KQL Analytics Rules
+// =========================================================================
+
+let sensitiveRoles = dynamic([
+    "Global Administrator",
+    "Security Administrator",
+    "Privileged Role Administrator",
+    "Privileged Authentication Administrator",
+    "Global Reader",
+    "User Access Administrator",
+    "Application Administrator",
+    "Cloud Application Administrator"
+]);
+
+AuditLogs
+| where TimeGenerated > ago(1d)
+| where OperationName in ("Add member to role", "Add eligible member to role in PIM completed (permanent)")
+| where Result == "success"
+// Extract role name from additional properties
+| extend RoleName = tostring(TargetResources[0].modifiedProperties[0].newValue)
+// Extract the target user (who was added)
+| extend TargetUserUPN = tostring(TargetResources[0].userPrincipalName)
+| extend TargetDisplayName = tostring(TargetResources[0].displayName)
+// Extract the initiator (who made the change)
+| extend InitiatedByUPN = tostring(InitiatedBy.user.userPrincipalName)
+| extend InitiatedByApp = tostring(InitiatedBy.app.displayName)
+// Parse role name from JSON string (Auth0 wraps it in quotes)
+| extend RoleNameClean = trim('"', RoleName)
+| where RoleNameClean in (sensitiveRoles)
+| project
+    TimeGenerated,
+    RoleName          = RoleNameClean,
+    TargetUser        = coalesce(TargetUserUPN, TargetDisplayName),
+    AssignedBy        = coalesce(InitiatedByUPN, InitiatedByApp, "Unknown"),
+    OperationName,
+    CorrelationId,
+    AdditionalDetails = tostring(AdditionalDetails)
+| extend
+    Alert = strcat("[HIGH] Privileged role assigned: ", RoleName, " granted to ", TargetUser, " by ", AssignedBy)
+| sort by TimeGenerated desc

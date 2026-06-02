@@ -1,0 +1,72 @@
+// =========================================================================
+// KQL Rule: Entra Connect (MSOL_) Account Anomaly Detection
+// Log Source: AuditLogs, SigninLogs (Entra ID via Sentinel connector)
+// Description: Detects anomalous operations by the Entra Connect sync account
+//              (MSOL_XXXXXXXXXX). This account has Directory.ReadWrite.All and
+//              is a Tier 0 asset. Any unexpected operations warrant investigation.
+// Severity: CRITICAL
+// Chapter 10 §10.7 — Sentinel KQL Analytics Rules
+// =========================================================================
+
+// The Entra Connect sync account — update with your actual MSOL_ account name
+// Find it: Get-ADUser -Filter {Name -like "MSOL_*"} | Select SamAccountName
+let syncAccountPrefix = "MSOL_";
+
+// Operations the sync account performs legitimately
+let legitimateSyncOps = dynamic([
+    "Synchronize DirectoryObject",
+    "Update user",
+    "Add user",
+    "Update group membership",
+    "Update device"
+]);
+
+// -----------------------------------------------------------------------
+// Alert 1: Sync account performing unexpected operations (non-sync activities)
+// -----------------------------------------------------------------------
+AuditLogs
+| where TimeGenerated > ago(4h)
+| where InitiatedBy.user.userPrincipalName startswith syncAccountPrefix
+    or InitiatedBy.user.displayName startswith "On-Premises Directory Synchronization"
+| where OperationName !in (legitimateSyncOps)
+| extend
+    SyncAccountUPN  = tostring(InitiatedBy.user.userPrincipalName),
+    TargetResource  = tostring(TargetResources[0].displayName),
+    TargetType      = tostring(TargetResources[0].type)
+| project
+    TimeGenerated,
+    AlertType       = "MSOL_UnexpectedOperation",
+    SyncAccount     = SyncAccountUPN,
+    OperationName,
+    TargetResource,
+    TargetType,
+    CorrelationId
+| extend
+    Alert = strcat("[CRITICAL] Entra Connect sync account performed unexpected operation: '", OperationName, "' on '", TargetResource, "'"),
+    ThreatScenario = "Attacker with access to MSOL_ account may be using it for lateral movement or data exfiltration beyond its intended sync scope"
+
+// -----------------------------------------------------------------------
+// Alert 2: Sync account sign-in from unexpected location
+// (Union with sign-in anomaly)
+// -----------------------------------------------------------------------
+| union (
+    SigninLogs
+    | where TimeGenerated > ago(4h)
+    | where UserPrincipalName startswith syncAccountPrefix
+    | where IPAddress !startswith "10."          // Entra Connect server is on-prem
+    | where IPAddress !startswith "192.168."
+    | where IPAddress !startswith "172.16."
+    | where ResultType == 0
+    | project
+        TimeGenerated,
+        AlertType     = "MSOL_UnexpectedSignIn",
+        SyncAccount   = UserPrincipalName,
+        OperationName = "Interactive Sign-In",
+        TargetResource = AppDisplayName,
+        TargetType    = "Application",
+        CorrelationId
+    | extend
+        Alert = strcat("[CRITICAL] Entra Connect account signed in interactively — this should NEVER happen in production"),
+        ThreatScenario = "MSOL_ accounts should only use sync service traffic, not interactive logins"
+)
+| sort by TimeGenerated desc

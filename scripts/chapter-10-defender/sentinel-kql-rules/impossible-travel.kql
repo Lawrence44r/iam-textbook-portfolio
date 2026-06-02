@@ -1,0 +1,71 @@
+// =========================================================================
+// KQL Rule: Impossible Travel Detection
+// Log Source: SigninLogs (Entra ID Sign-in Logs via Sentinel connector)
+// Description: Detects sign-in from two geographically distant locations
+//              within a short time window that would require impossible travel.
+// Chapter 10 §10.7 — Sentinel KQL Analytics Rules
+// =========================================================================
+
+let timeWindow = 1h;          // Look for two sign-ins within 1 hour
+let minDistanceKm = 500;       // Minimum distance to flag (km)
+
+SigninLogs
+| where TimeGenerated > ago(24h)
+| where ResultType == 0                    // Successful sign-ins only
+| where UserType != "Guest"               // Exclude B2B guests (often use VPN from home country)
+| where IPAddress !startswith "10."       // Exclude RFC1918 (internal)
+| where IPAddress !startswith "172.16."
+| where IPAddress !startswith "192.168."
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    UserId,
+    IPAddress,
+    Country = tostring(LocationDetails.countryOrRegion),
+    City    = tostring(LocationDetails.city),
+    Lat     = todouble(LocationDetails.geoCoordinates.latitude),
+    Lon     = todouble(LocationDetails.geoCoordinates.longitude),
+    AppDisplayName,
+    ClientAppUsed,
+    ConditionalAccessStatus
+| where isnotempty(Lat) and isnotempty(Lon)
+// Self-join to find pairs of sign-ins from the same user within timeWindow
+| join kind=inner (
+    SigninLogs
+    | where TimeGenerated > ago(24h)
+    | where ResultType == 0
+    | project
+        TimeGenerated2     = TimeGenerated,
+        UserPrincipalName2 = UserPrincipalName,
+        IPAddress2         = IPAddress,
+        Country2           = tostring(LocationDetails.countryOrRegion),
+        Lat2               = todouble(LocationDetails.geoCoordinates.latitude),
+        Lon2               = todouble(LocationDetails.geoCoordinates.longitude)
+    | where isnotempty(Lat2) and isnotempty(Lon2)
+) on $left.UserPrincipalName == $right.UserPrincipalName2
+| where abs(TimeGenerated - TimeGenerated2) between (1min .. timeWindow)
+| where TimeGenerated < TimeGenerated2    // Avoid duplicate pairs
+| extend
+    // Haversine distance approximation (degrees to km, simplified)
+    DeltaLat = abs(Lat - Lat2),
+    DeltaLon = abs(Lon - Lon2)
+| extend
+    // Simplified distance estimate (accurate enough for alerting purposes)
+    DistanceKm = sqrt(pow(DeltaLat * 111, 2) + pow(DeltaLon * 111 * cos(radians((Lat + Lat2) / 2)), 2))
+| where DistanceKm > minDistanceKm
+| where Country != Country2                // Must be different countries
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    FirstCountry  = Country,
+    FirstCity     = City,
+    FirstIP       = IPAddress,
+    SecondCountry = Country2,
+    SecondTime    = TimeGenerated2,
+    SecondIP      = IPAddress2,
+    DistanceKm    = round(DistanceKm, 0),
+    TimeDiffMinutes = round(datetime_diff('minute', TimeGenerated2, TimeGenerated), 0),
+    AppDisplayName,
+    ClientAppUsed
+| extend Alert = strcat("Impossible travel: ", UserPrincipalName, " signed in from ", FirstCountry, " and ", SecondCountry, " within ", TimeDiffMinutes, " minutes (", DistanceKm, " km apart)")
+| sort by TimeGenerated desc

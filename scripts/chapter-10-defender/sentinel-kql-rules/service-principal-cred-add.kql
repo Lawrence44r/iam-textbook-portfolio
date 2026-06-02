@@ -1,0 +1,47 @@
+// =========================================================================
+// KQL Rule: Service Principal Credential Added
+// Log Source: AuditLogs (Entra ID Audit Logs)
+// Description: Detects when a client secret or certificate is added to an
+//              App Registration or Service Principal.
+//              Attackers who gain write access to an app can add credentials
+//              to maintain persistent access (MITRE T1098.001).
+// Severity: MEDIUM–HIGH depending on app sensitivity
+// MITRE: T1098.001 — Account Manipulation: Additional Cloud Credentials
+// Chapter 10 §10.7 — Sentinel KQL Analytics Rules
+// =========================================================================
+
+AuditLogs
+| where TimeGenerated > ago(1d)
+| where OperationName in (
+    "Add service principal credentials",
+    "Update application – Certificates and secrets management",
+    "Add application",
+    "Update service principal"
+)
+| where Result == "success"
+// Extract key fields
+| extend
+    InitiatedByUPN  = tostring(InitiatedBy.user.userPrincipalName),
+    InitiatedByApp  = tostring(InitiatedBy.app.displayName),
+    InitiatedByIP   = tostring(InitiatedBy.user.ipAddress),
+    TargetAppName   = tostring(TargetResources[0].displayName),
+    TargetAppId     = tostring(TargetResources[0].id)
+| extend Initiator = coalesce(InitiatedByUPN, InitiatedByApp, "Unknown")
+// Extract credential type added (secret vs certificate)
+| extend ModifiedProperties = tostring(TargetResources[0].modifiedProperties)
+| extend CredentialType = iff(ModifiedProperties has "KeyCredentials", "Certificate", "ClientSecret")
+// Exclude known CI/CD service accounts and automated rotation processes
+| where Initiator !in ("azure-devops@yourcompany.com", "github-actions@yourcompany.com")
+| project
+    TimeGenerated,
+    OperationName,
+    Initiator,
+    InitiatedByIP,
+    TargetApp       = TargetAppName,
+    TargetAppId,
+    CredentialType,
+    CorrelationId
+| extend
+    Alert = strcat("[MEDIUM] Credential added to '", TargetApp, "': ", CredentialType, " added by ", Initiator, " from ", InitiatedByIP),
+    Recommendation = "1. Verify this was an authorized credential rotation. 2. Check if Initiator account was recently compromised (sign-in risk). 3. If unauthorized: remove credential immediately and rotate app secrets."
+| sort by TimeGenerated desc

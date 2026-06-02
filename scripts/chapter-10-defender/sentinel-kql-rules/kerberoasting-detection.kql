@@ -1,0 +1,50 @@
+// =========================================================================
+// KQL Rule: Kerberoasting Detection
+// Log Source: SecurityEvent (Windows Security Event Log via MMA/AMA)
+// Description: Detects bulk Kerberos service ticket requests (Event 4769)
+//              using RC4-HMAC (encryption type 0x17) from a single source.
+//              RC4 tickets are crackable offline; bulk requests indicate automated tooling.
+// Severity: HIGH
+// MITRE: T1558.003 — Kerberoasting
+// Chapter 10 §10.7 — Sentinel KQL Analytics Rules
+// =========================================================================
+
+let timeWindow      = 15min;    // Analysis window
+let minTicketCount  = 10;        // Minimum TGS requests to trigger alert
+let suspiciousEncryptionType = "0x17";  // RC4-HMAC (weak, crackable)
+
+SecurityEvent
+| where TimeGenerated > ago(24h)
+| where EventID == 4769                              // Kerberos Service Ticket Operation
+| where EventData contains "0x17"                   // RC4-HMAC encryption — crackable offline
+| where EventData !contains "0x12"                  // Not AES-256 (0x12) — exclude strong auth
+// Parse key fields from EventData XML
+| extend
+    ServiceName    = extract(@"ServiceName>\s*([^<]+)<", 1, EventData),
+    AccountName    = extract(@"TargetUserName>\s*([^<]+)<", 1, EventData),
+    ClientAddress  = extract(@"IpAddress>\s*([^<]+)<", 1, EventData),
+    TicketOptions  = extract(@"TicketOptions>\s*([^<]+)<", 1, EventData),
+    EncryptionType = extract(@"TicketEncryptionType>\s*([^<]+)<", 1, EventData)
+| where AccountName !endswith "$"                   // Exclude computer accounts
+| where ServiceName !in ("krbtgt", "kadmin", "changepw")  // Exclude DCrelated
+| summarize
+    TicketCount   = count(),
+    UniqueServices = dcount(ServiceName),
+    ServiceList   = make_set(ServiceName, 20),
+    StartTime     = min(TimeGenerated),
+    EndTime       = max(TimeGenerated)
+    by bin(TimeGenerated, timeWindow), AccountName, ClientAddress, Computer
+| where TicketCount >= minTicketCount
+| extend
+    Alert = strcat("[HIGH] Kerberoasting: ", AccountName, " requested ", TicketCount, " RC4 TGS tickets in ", timeWindow, " from ", ClientAddress),
+    Recommendation = "1. Check if account is a pen test asset. 2. Identify which services were requested. 3. Rotate SPN account passwords immediately. 4. Consider converting SPNs to Managed Service Accounts (MSA/gMSA)."
+| project
+    TimeGenerated = StartTime,
+    AccountName,
+    ClientAddress,
+    TicketCount,
+    UniqueServices,
+    ServiceList,
+    Alert,
+    Recommendation
+| sort by TicketCount desc

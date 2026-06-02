@@ -1,0 +1,49 @@
+// =========================================================================
+// KQL Rule: Mass User Modification
+// Log Source: AuditLogs (Entra ID Audit Logs)
+// Description: Detects bulk user attribute modifications that may indicate
+//              a compromised admin account or malicious insider activity.
+//              Legitimate bulk operations should be correlated with change tickets.
+// Severity: HIGH
+// Chapter 10 §10.7 — Sentinel KQL Analytics Rules
+// =========================================================================
+
+let timeWindow     = 15min;
+let minModCount    = 20;        // Alert threshold: >20 user modifications in 15 minutes
+
+AuditLogs
+| where TimeGenerated > ago(24h)
+| where OperationName in (
+    "Update user",
+    "Update user attributes",
+    "Reset user password",
+    "Disable account",
+    "Delete user"
+)
+| where Result == "success"
+| extend InitiatedByUPN = tostring(InitiatedBy.user.userPrincipalName)
+| extend InitiatedByApp = tostring(InitiatedBy.app.displayName)
+| extend Initiator = coalesce(InitiatedByUPN, InitiatedByApp, "Unknown")
+| where Initiator !startswith "Microsoft" // Exclude Microsoft automated processes
+| summarize
+    OperationCount  = count(),
+    UniqueTargets   = dcount(tostring(TargetResources[0].id)),
+    Operations      = make_set(OperationName, 10),
+    TargetUsers     = make_set(tostring(TargetResources[0].userPrincipalName), 10),
+    StartTime       = min(TimeGenerated),
+    EndTime         = max(TimeGenerated)
+    by bin(TimeGenerated, timeWindow), Initiator, CorrelationId
+| where OperationCount >= minModCount
+| extend
+    DurationMinutes = datetime_diff('minute', EndTime, StartTime),
+    Alert = strcat("[HIGH] Mass user modification: ", Initiator, " performed ", OperationCount, " user modifications on ", UniqueTargets, " accounts in ", timeWindow)
+| project
+    TimeGenerated = StartTime,
+    Initiator,
+    OperationCount,
+    UniqueTargets,
+    Operations,
+    TargetUsersSample = TargetUsers,
+    DurationMinutes,
+    Alert
+| sort by OperationCount desc
