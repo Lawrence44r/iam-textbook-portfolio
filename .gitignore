@@ -1,0 +1,86 @@
+# Secrets and credentials — NEVER commit these
+.env
+.env.*
+*.secret
+*.secrets
+secrets/
+credentials.json
+credentials.yaml
+credentials.yml
+config.local.json
+
+# Certificate and key files
+*.key
+*.pem
+*.pfx
+*.p12
+*.cer
+*.crt
+*.csr
+private/
+
+# PowerShell credential exports
+*.xml.encrypted
+*-cred.xml
+*-credential.xml
+
+# API tokens and auth files
+*.token
+auth_token*
+access_token*
+mgmt_token*
+
+# Log files
+*.log
+logs/
+*.log.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# OS artifacts
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE
+.vscode/settings.json
+.idea/
+*.suo
+*.user
+*.userosscache
+
+# Temp and output files
+*.tmp
+*.temp
+output/
+exports/
+*.csv.bak
+
+# Azure / Auth0 deployment configs (contain tenant IDs and secrets)
+config.dev.json
+config.staging.json
+config.prod.json
+a0deploy.config.json
+
+# Test output
+test-results/
+coverage/
