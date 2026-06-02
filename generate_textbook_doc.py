@@ -1,1146 +1,1667 @@
 """
-Enterprise IAM Architecture Textbook — Word Document Generator
-Font: Segoe UI 10pt throughout
-Features: Table of Contents, Analogy boxes inline, Inline citations [N], Reference list at end
-Run: python generate_textbook_doc.py
+Enterprise IAM Textbook — Comprehensive Word Document Generator
+Reads all scripts from disk, embeds full code, prose, labs, ADRs, and case study.
 Output: IAM_Textbook_Enterprise_Architecture.docx
 """
 
+from pathlib import Path
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-import copy
 
-OUTPUT_FILE = "IAM_Textbook_Enterprise_Architecture.docx"
-FONT_NAME   = "Segoe UI"
-BODY_SIZE   = Pt(10)
+BASE = Path(__file__).parent
+OUTPUT_FILE = BASE / "IAM_Textbook_Enterprise_Architecture.docx"
 
-# ─────────────────────────────────────────────────────────────
-# COLOUR PALETTE
-# ─────────────────────────────────────────────────────────────
-CLR_DARK_BLUE  = RGBColor(0x1F, 0x39, 0x64)   # Chapter headings
-CLR_MID_BLUE   = RGBColor(0x2E, 0x74, 0xB5)   # Section headings
-CLR_ACCENT     = RGBColor(0x70, 0xAD, 0x47)   # Key term highlight
-CLR_ANALOGY_BG = "FFF2CC"                      # Analogy box fill (yellow)
-CLR_NOTE_BG    = "DEEAF1"                      # Info/note box fill (blue)
-CLR_WARN_BG    = "FCE4D6"                      # Warning box fill (orange)
-CLR_CODE_BG    = "F2F2F2"                      # Code block fill (grey)
-CLR_WHITE      = "FFFFFF"
+REF_LIST = [
+    "Microsoft. Active Directory Domain Services Overview. Microsoft Learn, 2024.",
+    "Samba Team. Samba FSMO Roles Reference. samba.org, 2023.",
+    "Royce, J. Kerberos: The Network Authentication Protocol. MIT, RFC 4120, 2005.",
+    "Metcalf, S. Attacking Active Directory. adsecurity.org, 2023.",
+    "Microsoft. Certificate Services Architecture. Microsoft Learn, 2024.",
+    "Baines, O. Certified Pre-Owned: Abusing AD CS. SpecterOps, 2021.",
+    "NIST. Digital Identity Guidelines. SP 800-63-3, 2017.",
+    "Gartner. Magic Quadrant for Privileged Access Management. 2024.",
+    "CyberArk. Privileged Access Management Reference Architecture. cyberark.com, 2024.",
+    "HashiCorp. Vault Architecture Guide. developer.hashicorp.com, 2024.",
+    "NIST. Zero Trust Architecture. SP 800-207, 2020.",
+    "Microsoft. Conditional Access Overview. Microsoft Learn, 2024.",
+    "Kindervag, J. No More Chewy Centers: Zero Trust. Forrester, 2010.",
+    "SailPoint. Identity Governance Reference Architecture. sailpoint.com, 2024.",
+    "ISACA. Segregation of Duties in IT. ISACA Journal, 2023.",
+    "IETF. SCIM: System for Cross-domain Identity Management. RFC 7644, 2015.",
+    "Microsoft. Microsoft Entra ID Documentation. Microsoft Learn, 2024.",
+    "Microsoft. Microsoft Graph API Reference. Microsoft Learn, 2024.",
+    "Auth0. Auth0 Documentation. auth0.com, 2024.",
+    "Okta. Customer Identity and Access Management. okta.com, 2024.",
+    "Microsoft. Microsoft Defender XDR Documentation. Microsoft Learn, 2024.",
+    "Microsoft. Microsoft Sentinel KQL Reference. Microsoft Learn, 2024.",
+    "MITRE. ATT&CK Framework. attack.mitre.org, 2024.",
+    "NIST. AI Risk Management Framework. NIST AI 100-1, 2023.",
+    "OWASP. LLM Top 10 for Large Language Model Applications. owasp.org, 2024.",
+    "Anthropic. Claude API Documentation. anthropic.com, 2024.",
+    "Gartner. AI TRiSM Framework. Gartner, 2023.",
+    "ISO/IEC 42001. AI Management System Standard. ISO, 2023.",
+]
 
-# ─────────────────────────────────────────────────────────────
-# REFERENCE DATABASE
-# ─────────────────────────────────────────────────────────────
-REFERENCES = {
-    1:  "NIST SP 800-63-3, \"Digital Identity Guidelines,\" National Institute of Standards and Technology, 2017. https://pages.nist.gov/800-63-3/",
-    2:  "NIST SP 800-207, \"Zero Trust Architecture,\" National Institute of Standards and Technology, 2020. https://doi.org/10.6028/NIST.SP.800-207",
-    3:  "RFC 6749, \"The OAuth 2.0 Authorization Framework,\" IETF, 2012. https://datatracker.ietf.org/doc/html/rfc6749",
-    4:  "RFC 7519, \"JSON Web Token (JWT),\" IETF, 2015. https://datatracker.ietf.org/doc/html/rfc7519",
-    5:  "OASIS, \"Assertions and Protocols for the OASIS Security Assertion Markup Language (SAML) V2.0,\" 2005. https://docs.oasis-open.org/security/saml/v2.0/",
-    6:  "CISA, \"Zero Trust Maturity Model v2.0,\" Cybersecurity and Infrastructure Security Agency, 2023. https://www.cisa.gov/zero-trust-maturity-model",
-    7:  "NIST AI 100-1, \"Artificial Intelligence Risk Management Framework (AI RMF 1.0),\" National Institute of Standards and Technology, 2023. https://doi.org/10.6028/NIST.AI.100-1",
-    8:  "Microsoft, \"What is Microsoft Entra ID?,\" Microsoft Learn, 2024. https://learn.microsoft.com/en-us/entra/fundamentals/whatis",
-    9:  "Auth0, \"Auth0 Documentation,\" Okta, 2024. https://auth0.com/docs",
-    10: "HITRUST Alliance, \"HITRUST CSF,\" 2023. https://hitrustalliance.net/hitrust-csf/",
-    11: "Sayer, O. et al., \"Certified Pre-Owned: Abusing Active Directory Certificate Services,\" SpecterOps, 2021. https://posts.specterops.io/certified-pre-owned-d95910965cd2",
-    12: "MITRE ATT&CK, \"Enterprise Matrix,\" MITRE, 2024. https://attack.mitre.org/matrices/enterprise/",
-    13: "RFC 7644, \"System for Cross-domain Identity Management: Protocol,\" IETF, 2015. https://datatracker.ietf.org/doc/html/rfc7644",
-    14: "OWASP, \"OWASP Top 10 for Large Language Model Applications,\" 2023. https://owasp.org/www-project-top-10-for-large-language-model-applications/",
-    15: "Kerberos Working Group, RFC 4120, \"The Kerberos Network Authentication Service (V5),\" IETF, 2005. https://datatracker.ietf.org/doc/html/rfc4120",
-    16: "Microsoft, \"How PHS works,\" Microsoft Learn, 2024. https://learn.microsoft.com/en-us/entra/identity/hybrid/connect/how-to-connect-password-hash-synchronization",
-    17: "NIST SP 800-53 Rev 5, \"Security and Privacy Controls for Information Systems and Organizations,\" NIST, 2020. https://doi.org/10.6028/NIST.SP.800-53r5",
-    18: "SailPoint, \"The Definitive Guide to Identity Governance and Administration,\" SailPoint Technologies, 2023. https://www.sailpoint.com/identity-library/",
-    19: "CyberArk, \"Privileged Access Management,\" CyberArk Software, 2024. https://www.cyberark.com/resources/",
-    20: "Microsoft, \"Continuous Access Evaluation,\" Microsoft Learn, 2024. https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation",
-    21: "OpenID Foundation, \"OpenID Connect Core 1.0,\" 2014. https://openid.net/specs/openid-connect-core-1_0.html",
-    22: "X.509, \"Information technology – Open Systems Interconnection – The Directory: Public-key and attribute certificate frameworks,\" ITU-T, 2019.",
-    23: "Litan, A. and Wheatman, V., \"Magic Quadrant for Access Management,\" Gartner, 2024.",
-    24: "HIPAA, \"Security Rule (45 CFR Part 164),\" U.S. Department of Health and Human Services. https://www.hhs.gov/hipaa/for-professionals/security/",
-    25: "SOX, \"Sarbanes-Oxley Act of 2002,\" U.S. Congress, 2002. https://www.sec.gov/about/laws/soa2002.pdf",
-    26: "Shostack, A., \"Threat Modeling: Designing for Security,\" Wiley, 2014.",
-    27: "NIST SP 800-190, \"Application Container Security Guide,\" NIST, 2017. https://doi.org/10.6028/NIST.SP.800-190",
-    28: "RFC 7636, \"Proof Key for Code Exchange by OAuth Public Clients (PKCE),\" IETF, 2015. https://datatracker.ietf.org/doc/html/rfc7636",
-    29: "NIST SP 800-145, \"The NIST Definition of Cloud Computing,\" NIST, 2011. https://doi.org/10.6028/NIST.SP.800-145",
-    30: "Microsoft, \"Microsoft Sentinel Documentation,\" Microsoft Learn, 2024. https://learn.microsoft.com/en-us/azure/sentinel/",
-}
 
-# ─────────────────────────────────────────────────────────────
-# LOW-LEVEL XML HELPERS
-# ─────────────────────────────────────────────────────────────
-def set_cell_bg(cell, hex_color):
-    tc   = cell._tc
+def read_script(rel_path: str) -> str:
+    p = BASE / rel_path
+    if p.exists():
+        return p.read_text(encoding="utf-8", errors="replace")
+    return f"# File not found: {rel_path}\n"
+
+
+def set_font(run, name="Segoe UI", size=10, bold=False, italic=False, color=None):
+    run.font.name = name
+    run.font.size = Pt(size)
+    run.font.bold = bold
+    run.font.italic = italic
+    if color:
+        run.font.color.rgb = RGBColor(*color)
+
+
+def add_toc(doc):
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = para.add_run("TABLE OF CONTENTS")
+    set_font(run, bold=True, size=13)
+    doc.add_paragraph()
+
+    fldChar_begin = OxmlElement("w:fldChar")
+    fldChar_begin.set(qn("w:fldCharType"), "begin")
+    instrText = OxmlElement("w:instrText")
+    instrText.set(qn("xml:space"), "preserve")
+    instrText.text = 'TOC \\o "1-3" \\h \\z \\u'
+    fldChar_separate = OxmlElement("w:fldChar")
+    fldChar_separate.set(qn("w:fldCharType"), "separate")
+    fldChar_end = OxmlElement("w:fldChar")
+    fldChar_end.set(qn("w:fldCharType"), "end")
+
+    toc_para = doc.add_paragraph()
+    run_elem = toc_para.add_run()
+    run_elem._r.append(fldChar_begin)
+    run_elem._r.append(instrText)
+    run_elem._r.append(fldChar_separate)
+    run_elem._r.append(fldChar_end)
+
+
+def shade_cell(cell, fill_hex: str):
+    tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
-    shd  = OxmlElement("w:shd")
-    shd.set(qn("w:val"),   "clear")
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
     shd.set(qn("w:color"), "auto")
-    shd.set(qn("w:fill"),  hex_color)
+    shd.set(qn("w:fill"), fill_hex)
     tcPr.append(shd)
 
-def add_toc_field(doc):
-    """Insert a TOC field that Word will populate on open / Ctrl+A, F9."""
-    para  = doc.add_paragraph()
-    run   = para.add_run()
-    fldCh = OxmlElement("w:fldChar")
-    fldCh.set(qn("w:fldCharType"), "begin")
-    run._r.append(fldCh)
 
-    instrR = para.add_run()
-    instrT = OxmlElement("w:instrText")
-    instrT.set(qn("xml:space"), "preserve")
-    instrT.text = ' TOC \\o "1-3" \\h \\z \\u '
-    instrR._r.append(instrT)
+def add_code_block(doc, code: str, filename: str = ""):
+    if filename:
+        lbl = doc.add_paragraph()
+        r = lbl.add_run(filename)
+        set_font(r, name="Segoe UI", size=9, bold=True, color=(80, 80, 80))
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    cell = table.cell(0, 0)
+    shade_cell(cell, "F2F2F2")
+    cell.paragraphs[0].clear()
+    lines = code.split("\n")
+    for i, line in enumerate(lines):
+        if i == 0:
+            p = cell.paragraphs[0]
+        else:
+            p = cell.add_paragraph()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        r = p.add_run(line)
+        set_font(r, name="Courier New", size=8)
+    doc.add_paragraph()
 
-    fldCh2 = OxmlElement("w:fldChar")
-    fldCh2.set(qn("w:fldCharType"), "separate")
-    para.add_run()._r.append(fldCh2)
 
-    fldCh3 = OxmlElement("w:fldChar")
-    fldCh3.set(qn("w:fldCharType"), "end")
-    para.add_run()._r.append(fldCh3)
-
-def set_para_font(para, size=BODY_SIZE, bold=False, italic=False,
-                  color=None, name=FONT_NAME):
-    for run in para.runs:
-        run.font.name  = name
-        run.font.size  = size
-        run.font.bold  = bold
-        run.font.italic = italic
-        if color:
-            run.font.color.rgb = color
-
-# ─────────────────────────────────────────────────────────────
-# STYLE HELPERS
-# ─────────────────────────────────────────────────────────────
-def setup_styles(doc):
-    styles = doc.styles
-    normal = styles["Normal"]
-    normal.font.name = FONT_NAME
-    normal.font.size = BODY_SIZE
-
-    for h_name, size, color in [
-        ("Heading 1", Pt(16), CLR_DARK_BLUE),
-        ("Heading 2", Pt(13), CLR_MID_BLUE),
-        ("Heading 3", Pt(11), CLR_MID_BLUE),
-    ]:
-        try:
-            h = styles[h_name]
-        except KeyError:
-            h = styles.add_style(h_name, WD_STYLE_TYPE.PARAGRAPH)
-        h.font.name      = FONT_NAME
-        h.font.size      = size
-        h.font.bold      = True
-        h.font.color.rgb = color
-        h.paragraph_format.space_before = Pt(14)
-        h.paragraph_format.space_after  = Pt(6)
-
-# ─────────────────────────────────────────────────────────────
-# CONTENT HELPERS
-# ─────────────────────────────────────────────────────────────
-def h1(doc, text):
-    p = doc.add_heading(text, level=1)
-    p.runs[0].font.name  = FONT_NAME
-    p.runs[0].font.color.rgb = CLR_DARK_BLUE
+def add_h1(doc, text: str):
+    p = doc.add_paragraph()
+    p.style = "Heading 1"
+    run = p.add_run(text)
+    set_font(run, size=14, bold=True, color=(0, 70, 127))
     return p
 
-def h2(doc, text):
-    p = doc.add_heading(text, level=2)
-    for r in p.runs:
-        r.font.name  = FONT_NAME
-        r.font.color.rgb = CLR_MID_BLUE
+
+def add_h2(doc, text: str):
+    p = doc.add_paragraph()
+    p.style = "Heading 2"
+    run = p.add_run(text)
+    set_font(run, size=12, bold=True, color=(31, 73, 125))
     return p
 
-def h3(doc, text):
-    p = doc.add_heading(text, level=3)
-    for r in p.runs:
-        r.font.name  = FONT_NAME
-        r.font.color.rgb = CLR_MID_BLUE
+
+def add_h3(doc, text: str):
+    p = doc.add_paragraph()
+    p.style = "Heading 3"
+    run = p.add_run(text)
+    set_font(run, size=11, bold=True, color=(54, 96, 146))
     return p
 
-def body(doc, text, bold_phrases=None):
-    """Add a body paragraph. bold_phrases is a list of substrings to bold."""
-    if bold_phrases:
-        para = doc.add_paragraph()
-        remaining = text
-        for phrase in bold_phrases:
-            idx = remaining.find(phrase)
-            if idx == -1:
-                continue
-            if idx > 0:
-                r = para.add_run(remaining[:idx])
-                r.font.name = FONT_NAME
-                r.font.size = BODY_SIZE
-            br = para.add_run(phrase)
-            br.font.name = FONT_NAME
-            br.font.size = BODY_SIZE
-            br.bold = True
-            remaining = remaining[idx + len(phrase):]
-        if remaining:
-            r = para.add_run(remaining)
-            r.font.name = FONT_NAME
-            r.font.size = BODY_SIZE
-    else:
-        para = doc.add_paragraph(text)
-        for r in para.runs:
-            r.font.name = FONT_NAME
-            r.font.size = BODY_SIZE
-    para.paragraph_format.space_after = Pt(6)
-    return para
 
-def cite(doc, text, ref_nums):
-    """Body paragraph ending with inline citation(s) e.g. [1][2]."""
-    refs = "".join(f"[{n}]" for n in ref_nums)
-    para = doc.add_paragraph()
-    r1   = para.add_run(text + " ")
-    r1.font.name = FONT_NAME
-    r1.font.size = BODY_SIZE
-    r2   = para.add_run(refs)
-    r2.font.name  = FONT_NAME
-    r2.font.size  = Pt(8)
-    r2.font.color.rgb = CLR_MID_BLUE
-    r2.font.bold  = True
-    para.paragraph_format.space_after = Pt(6)
-    return para
+def add_body(doc, text: str, cite_nums: list = None):
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(6)
+    r = p.add_run(text)
+    set_font(r)
+    if cite_nums:
+        for n in cite_nums:
+            rc = p.add_run(f" [{n}]")
+            set_font(rc, size=8, color=(0, 0, 200))
+    return p
 
-def bullet(doc, text, level=0):
-    style = "List Bullet" if level == 0 else "List Bullet 2"
-    try:
-        para = doc.add_paragraph(text, style=style)
-    except KeyError:
-        para = doc.add_paragraph(f"• {text}")
-    for r in para.runs:
-        r.font.name = FONT_NAME
-        r.font.size = BODY_SIZE
-    return para
 
-def analogy_box(doc, title, text):
-    """Yellow shaded box for analogy explanations."""
-    tbl = doc.add_table(rows=1, cols=1)
-    tbl.style = "Table Grid"
-    cell = tbl.cell(0, 0)
-    set_cell_bg(cell, CLR_ANALOGY_BG)
-    p1 = cell.paragraphs[0]
-    r_icon  = p1.add_run("💡  ANALOGY — ")
-    r_icon.font.name  = FONT_NAME
-    r_icon.font.size  = BODY_SIZE
-    r_icon.font.bold  = True
-    r_icon.font.color.rgb = RGBColor(0x7F, 0x60, 0x00)
-    r_title = p1.add_run(title.upper())
-    r_title.font.name  = FONT_NAME
-    r_title.font.size  = BODY_SIZE
-    r_title.font.bold  = True
-    r_title.font.color.rgb = RGBColor(0x7F, 0x60, 0x00)
-    p2 = cell.add_paragraph(text)
-    for r in p2.runs:
-        r.font.name   = FONT_NAME
-        r.font.size   = BODY_SIZE
-        r.font.italic = True
-    doc.add_paragraph()  # spacing after box
-    return tbl
+def add_bullet(doc, text: str, level: int = 0):
+    p = doc.add_paragraph(style="List Bullet")
+    p.paragraph_format.left_indent = Inches(0.25 * (level + 1))
+    r = p.add_run(text)
+    set_font(r)
 
-def note_box(doc, title, text):
-    """Blue shaded informational box."""
-    tbl  = doc.add_table(rows=1, cols=1)
-    tbl.style = "Table Grid"
-    cell = tbl.cell(0, 0)
-    set_cell_bg(cell, CLR_NOTE_BG)
-    p1 = cell.paragraphs[0]
-    r1 = p1.add_run(f"ℹ  {title.upper()}")
-    r1.font.name = FONT_NAME
-    r1.font.size = BODY_SIZE
-    r1.font.bold = True
-    r1.font.color.rgb = CLR_DARK_BLUE
-    p2 = cell.add_paragraph(text)
-    for r in p2.runs:
-        r.font.name = FONT_NAME
-        r.font.size = BODY_SIZE
-    doc.add_paragraph()
-    return tbl
 
-def interview_box(doc, questions):
-    """Interview cheat-sheet at end of each chapter."""
-    tbl  = doc.add_table(rows=1, cols=1)
-    tbl.style = "Table Grid"
-    cell = tbl.cell(0, 0)
-    set_cell_bg(cell, "E2EFDA")
-    p1 = cell.paragraphs[0]
-    r1 = p1.add_run("🎯  INTERVIEW CHEAT SHEET")
-    r1.font.name = FONT_NAME
-    r1.font.size = BODY_SIZE
-    r1.font.bold = True
-    r1.font.color.rgb = RGBColor(0x37, 0x5E, 0x23)
-    for q in questions:
-        pq = cell.add_paragraph(f"• {q}")
-        for r in pq.runs:
-            r.font.name = FONT_NAME
-            r.font.size = BODY_SIZE
+def analogy_box(doc, title: str, text: str):
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    cell = table.cell(0, 0)
+    shade_cell(cell, "FFF2CC")
+    cell.paragraphs[0].clear()
+    tp = cell.paragraphs[0]
+    rt = tp.add_run(f"Analogy -- {title}")
+    set_font(rt, size=10, bold=True, color=(127, 96, 0))
+    bp = cell.add_paragraph()
+    rb = bp.add_run(text)
+    set_font(rb, size=10, italic=True)
     doc.add_paragraph()
 
-def key_term(doc, term, definition, ref_num=None):
-    """Bolded key term + definition on same paragraph."""
-    para = doc.add_paragraph()
-    rt = para.add_run(f"{term}: ")
-    rt.font.name  = FONT_NAME
-    rt.font.size  = BODY_SIZE
-    rt.font.bold  = True
-    rt.font.color.rgb = CLR_MID_BLUE
-    rd = para.add_run(definition)
-    rd.font.name = FONT_NAME
-    rd.font.size = BODY_SIZE
-    if ref_num:
-        rc = para.add_run(f" [{ref_num}]")
-        rc.font.name  = FONT_NAME
-        rc.font.size  = Pt(8)
-        rc.font.color.rgb = CLR_MID_BLUE
-        rc.font.bold  = True
-    para.paragraph_format.space_after = Pt(4)
-    return para
 
-def divider(doc):
-    doc.add_paragraph("─" * 80)
-
-def self_check(doc, questions):
-    h3(doc, "Self-Check Questions")
-    for i, q in enumerate(questions, 1):
-        para = doc.add_paragraph()
-        rn = para.add_run(f"{i}. ")
-        rn.font.name = FONT_NAME
-        rn.font.size = BODY_SIZE
-        rn.font.bold = True
-        rq = para.add_run(q)
-        rq.font.name = FONT_NAME
-        rq.font.size = BODY_SIZE
-
-def add_reference_list(doc):
-    doc.add_page_break()
-    h1(doc, "References")
-    body(doc, "All references cited inline throughout the text using [N] notation.")
-    doc.add_paragraph()
-    for num in sorted(REFERENCES.keys()):
-        para = doc.add_paragraph()
-        rn = para.add_run(f"[{num}]  ")
-        rn.font.name  = FONT_NAME
-        rn.font.size  = BODY_SIZE
-        rn.font.bold  = True
-        rn.font.color.rgb = CLR_MID_BLUE
-        rt = para.add_run(REFERENCES[num])
-        rt.font.name = FONT_NAME
-        rt.font.size = BODY_SIZE
-        para.paragraph_format.left_indent = Inches(0.4)
-        para.paragraph_format.first_line_indent = Inches(-0.4)
-        para.paragraph_format.space_after = Pt(5)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CHAPTER CONTENT
-# ─────────────────────────────────────────────────────────────────────────────
-
-def chapter_01(doc):
-    h1(doc, "Chapter 1: Identity Foundations")
-    cite(doc,
-         "Identity and Access Management (IAM) is the discipline of ensuring that the right principals have the right access to the right resources at the right time. It sits at the intersection of security, compliance, and user experience — a discipline that failures in can either lock out legitimate users or allow attackers unfettered access to crown-jewel systems.",
-         [1, 17])
-
-    h2(doc, "1.1  What Is an Identity?")
-    analogy_box(doc,
-        "The Hotel Key Card",
-        "Think of an identity as a hotel key card. The card itself is just plastic — it has no meaning without the hotel's system behind it. The system knows: which room you booked, how long your stay is, and whether you've checked in yet. Identity is the claim; the identity system is what gives that claim meaning and enforces what it can unlock.")
-    cite(doc,
-         "In digital systems, an identity is an authoritative representation of a principal — a user, device, application, or service. Every identity consists of a set of attributes (name, department, role, security clearance) and is anchored to an authoritative source such as an HR system or a directory service.",
-         [1])
-    key_term(doc, "Principal", "Any entity (human, machine, or service) that can authenticate and be granted access.", 1)
-    key_term(doc, "Identity Provider (IdP)", "A system that creates, maintains, and manages identity information while providing authentication services to relying applications.", 1)
-    key_term(doc, "Service Provider (SP) / Relying Party (RP)", "An application or service that trusts the IdP to assert who the user is, without performing authentication itself.", 5)
-
-    h2(doc, "1.2  The Identity Lifecycle")
-    analogy_box(doc,
-        "The Employee Badge",
-        "An identity lifecycle is like an employee badge: created on day one (Joiner), updated when the employee changes departments (Mover), and deactivated the moment they leave (Leaver). A badge still active after someone leaves is exactly the same risk as a user account left enabled after termination.")
-    cite(doc,
-         "The Joiner-Mover-Leaver (JML) lifecycle defines the three critical events that drive identity changes. Joiner: new employee or contractor is onboarded — accounts provisioned within hours of HR trigger. Mover: role change, department transfer, or privilege change — entitlements adjusted to reflect new position. Leaver: termination or contract end — all access revoked within SLA (typically 4 hours for full-time employees, 1 hour for privileged accounts).",
-         [17, 18])
-    bullet(doc, "Joiner: Account creation, group membership, system access provisioned via IGA workflow")
-    bullet(doc, "Mover: Role-based entitlement change; old access removed before new access granted (no accumulation)")
-    bullet(doc, "Leaver: Disable account, remove group memberships, revoke tokens, archive data, notify manager")
-
-    h2(doc, "1.3  Authentication vs. Authorisation")
-    analogy_box(doc,
-        "The Airport Security Lane",
-        "Authentication is the passport control desk — it asks 'Who are you?' and verifies your identity document. Authorisation is the boarding gate — it asks 'Are you allowed on this flight?' You can pass passport control (authenticate) and still be denied boarding (not authorised) because you're on the wrong flight.")
-    key_term(doc, "Authentication (AuthN)", "The process of verifying that a claimed identity is genuine. Factors: something you know (password), something you have (hardware token), something you are (biometric).", 1)
-    key_term(doc, "Authorisation (AuthZ)", "The process of determining what an authenticated principal is permitted to do. Separate from authentication — a user may authenticate successfully but have no authorisation to a specific resource.", 1)
-    key_term(doc, "Multi-Factor Authentication (MFA)", "Authentication using two or more independent factors from different categories. Phishing-resistant MFA (FIDO2/passkeys, PIV/smart card) is the gold standard.", 1)
-
-    h2(doc, "1.4  Access Control Models")
-    cite(doc,
-         "Four primary access control models exist, each with different trade-offs between flexibility and administrative overhead.",
-         [17])
-    bullet(doc, "DAC (Discretionary Access Control): Resource owner decides who gets access. Simple but unscalable — file shares with individual ACLs are DAC.")
-    bullet(doc, "MAC (Mandatory Access Control): Labels govern access — a Top Secret user cannot share with a Confidential user. Used in government/military (SELinux, MLS).")
-    bullet(doc, "RBAC (Role-Based Access Control): Access granted based on job role (e.g., 'Nurse' role = EHR read access). Most common enterprise model. Risk: role explosion and birthright access accumulation.")
-    bullet(doc, "ABAC (Attribute-Based Access Control): Access granted based on policy evaluating multiple attributes — user.department == resource.owner_department AND time.hour BETWEEN 8 AND 18. Most flexible; used in Zero Trust environments.")
-
-    note_box(doc, "Architect Insight",
-             "RBAC is where most organisations start. ABAC is where mature Zero Trust organisations end up. The migration path is: start with RBAC to bring order, then layer ABAC policies on top for context-aware control without rebuilding the RBAC foundation.")
-
-    self_check(doc, [
-        "Explain the difference between authentication and authorisation using a real-world analogy of your own.",
-        "A user changes departments from Finance to Engineering. List every JML action that should be triggered and in what order.",
-        "Which access control model would you recommend for a clinical EHR system? Justify your choice with at least two specific requirements.",
-        "What is the difference between a principal and an identity? Give three examples of non-human principals.",
-        "Why is phishing-resistant MFA categorically different from SMS-based MFA?"
-    ])
-    interview_box(doc, [
-        "What is the difference between RBAC and ABAC, and when would you choose one over the other?",
-        "Walk me through the Leaver process: what must happen in the first 4 hours after a termination?",
-        "Why is MFA coverage a lagging indicator rather than a leading indicator of identity security maturity?",
-        "How does a Zero Trust model change the role of network perimeter in an access control architecture?"
-    ])
+def add_page_break(doc):
     doc.add_page_break()
 
 
-def chapter_02(doc):
-    h1(doc, "Chapter 2: Directory Services")
-    cite(doc,
-         "Directory services are the authoritative source of identity truth in enterprise environments. Active Directory Domain Services (AD DS) remains the dominant on-premises directory technology, serving as the backbone for authentication, authorisation, and policy enforcement across hundreds of millions of endpoints worldwide.",
-         [15])
-
-    h2(doc, "2.1  Active Directory Architecture")
-    analogy_box(doc,
-        "The Corporate Org Chart",
-        "Active Directory is structured like a corporate org chart. A Forest is the company — it sets the ultimate trust boundary. Domains are divisions within the company. Organisational Units (OUs) are departments. Users and computers are individuals sitting in those departments. Group Policy Objects (GPOs) are the company policies posted on the walls — they apply to whoever sits in that office, whether they like it or not.")
-    cite(doc,
-         "Active Directory uses a hierarchical namespace. A Forest is the top-level security boundary containing one or more Domains sharing a common schema and Global Catalog. Domains contain Organisational Units (OUs) which contain Users, Groups, Computers, and other OUs. Trust relationships between domains allow authentication to flow across the hierarchy.",
-         [15])
-    key_term(doc, "Forest", "The ultimate security boundary in Active Directory. Separate forests do not share schema, configuration, or trust by default.", 15)
-    key_term(doc, "Domain", "An administrative boundary within a forest. Domains share the forest schema but have independent domain-level policies and their own domain controllers.", 15)
-    key_term(doc, "Global Catalog (GC)", "A domain controller that holds a partial read-only replica of all objects in the forest. Required for forest-wide user lookups and UPN-based logon.", 15)
-
-    h2(doc, "2.2  FSMO Roles")
-    cite(doc,
-         "Flexible Single Master Operations (FSMO) roles are Active Directory functions that can only be performed by one DC at a time to prevent conflicting writes. There are five FSMO roles across two categories.",
-         [15])
-    bullet(doc, "Schema Master (forest-wide): Controls all schema modifications. Only one per forest.")
-    bullet(doc, "Domain Naming Master (forest-wide): Controls addition/removal of domains. Only one per forest.")
-    bullet(doc, "PDC Emulator (per domain): Handles password changes, time synchronisation, Group Policy updates, and account lockouts.")
-    bullet(doc, "RID Master (per domain): Allocates pools of Relative Identifiers (RIDs) to domain controllers for creating security principals.")
-    bullet(doc, "Infrastructure Master (per domain): Maintains references to objects in other domains.")
-    note_box(doc, "Architecture Pitfall",
-             "Infrastructure Master must NOT be co-located with a Global Catalog server in a multi-domain forest. Because GC holds all objects, the Infrastructure Master never sees phantom objects that need updating — causing stale cross-domain references. In single-domain forests, this restriction does not apply.")
-
-    h2(doc, "2.3  Kerberos Authentication Protocol")
-    analogy_box(doc,
-        "The Concert Wristband System",
-        "Kerberos works like a concert with multiple stages: (1) You show your ID at the main gate and get a wristband (TGT — Ticket Granting Ticket). (2) At each stage, you show your wristband and get a single-use stage pass (Service Ticket — ST). (3) Each stage only accepts its own passes — they never see your original ID. The wristband desk (KDC) is the trust anchor; the stages (services) never need to call back to verify you.")
-    cite(doc,
-         "Kerberos v5 [RFC 4120] is the default authentication protocol in Active Directory environments. The three-party exchange: (1) AS-REQ/AS-REP: Client requests TGT from Authentication Service, encrypted with krbtgt hash. (2) TGS-REQ/TGS-REP: Client presents TGT to Ticket Granting Service, requests Service Ticket for specific resource. (3) AP-REQ: Client presents Service Ticket to the target service, which decrypts it with its own secret key.",
-         [15])
-
-    h2(doc, "2.4  Kerberos Attack Surface")
-    cite(doc,
-         "Three major attack categories target Kerberos. Each exploits a different design assumption of the protocol.",
-         [12, 15])
-    key_term(doc, "Kerberoasting", "Requests Service Tickets for user accounts with SPNs (Service Principal Names). The ticket is encrypted with the service account's NTLM hash — offline crackable. Mitigation: Use Managed Service Accounts (gMSA) with 240-character random passwords.", 12)
-    key_term(doc, "AS-REP Roasting", "Targets accounts with Pre-Authentication disabled (DoesNotRequirePreAuth). The KDC returns an AS-REP encrypted with the user's password hash without verifying identity first. Mitigation: Never disable pre-authentication.", 12)
-    key_term(doc, "Pass-the-Ticket (PtT)", "Extracts Kerberos tickets from memory (lsass.exe) and reuses them on another machine. Mitigation: Credential Guard, Protected Users group, Restricted Admin mode.", 12)
-
-    h2(doc, "2.5  Group Policy Objects")
-    analogy_box(doc,
-        "The Building Code",
-        "Group Policy is like a city's building code. The city code (domain policy) applies everywhere. Borough codes (OU policies) add local requirements. An individual building owner can post their own rules (local policy) — but city code always wins. The processing order — Local → Site → Domain → OU (LSDOU) — determines which rule wins on conflict.")
-    cite(doc,
-         "GPO processing follows the LSDOU order: Local Policy → Site GPOs → Domain GPOs → OU GPOs (parent to child, innermost OU wins). Block Inheritance prevents parent GPOs from applying to a specific OU. Enforced (No Override) GPOs bypass Block Inheritance.",
-         [17])
-
-    self_check(doc, [
-        "Draw the Kerberos AS-REQ, TGS-REQ, and AP-REQ flow between Client, KDC, and File Server.",
-        "Why must the Infrastructure Master not be on a GC server in a multi-domain forest?",
-        "Explain the difference between Kerberoasting and AS-REP Roasting, and give a mitigation for each.",
-        "What does the LSDOU acronym stand for, and which setting can override LSDOU processing order?",
-        "What is a Golden Ticket attack, and why does rotating the krbtgt key TWICE matter?"
-    ])
-    interview_box(doc, [
-        "A penetration tester finds 23 accounts with SPNs in your domain. What is the risk, and what is your remediation plan?",
-        "Explain what krbtgt is and why it matters for Golden Ticket attacks.",
-        "You're asked to merge two AD forests from an acquisition. Walk me through the key architectural decisions.",
-        "How does Password Hash Sync (PHS) work, and why might you choose it over AD FS?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_03(doc):
-    h1(doc, "Chapter 3: Public Key Infrastructure")
-    cite(doc,
-         "Public Key Infrastructure (PKI) is the framework that makes secure digital communication possible. It solves the fundamental problem of distributed trust: how do two parties who have never met verify each other's identity and communicate securely? The answer is a chain of trust anchored in a Certificate Authority.",
-         [22])
-
-    h2(doc, "3.1  PKI Fundamentals")
-    analogy_box(doc,
-        "The Notary Chain",
-        "A PKI certificate chain works like a chain of notarised documents. Your driver's licence (leaf certificate) was issued by the DMV (Intermediate CA), which is authorised by the state government (Root CA). If you trust the state, you trust the DMV, and therefore trust the licence. Break any link in that chain — the state gets compromised, or the DMV's seal is forged — and every licence it ever issued becomes suspect.")
-    cite(doc,
-         "Public key cryptography uses asymmetric key pairs: a public key (shareable) and a private key (secret). A digital certificate (X.509 format) binds a public key to an identity, signed by a CA whose own certificate is trusted by the verifier. The chain: Root CA → Intermediate/Issuing CA → Leaf Certificate.",
-         [22])
-    key_term(doc, "Certificate Authority (CA)", "An entity trusted to issue, sign, and revoke digital certificates. The Root CA's public key is pre-trusted by operating systems and browsers.", 22)
-    key_term(doc, "X.509 Certificate", "The standard format for public key certificates. Contains: subject, issuer, validity period, public key, Subject Alternative Names (SANs), and digital signature.", 22)
-    key_term(doc, "Certificate Revocation List (CRL)", "A periodically published list of revoked certificate serial numbers. Checked by clients during certificate validation. OCSP is the online real-time alternative.", 22)
-
-    h2(doc, "3.2  PKI Hierarchy Design")
-    cite(doc,
-         "Two-tier PKI (Root CA → Issuing CA) is appropriate for most enterprise environments. Three-tier (Root → Policy CA → Issuing CA) adds a layer of separation for very large, multi-region deployments. The Root CA should be offline (air-gapped) — it issues only the Issuing CA certificate and then powers off.",
-         [22])
-    note_box(doc, "Architecture Best Practice",
-             "Offline Root CA: Store the Root CA on an air-gapped machine in a physically secured location (HSM + safe). Boot it only to issue new Issuing CA certificates (typically every 5-10 years) or to update the CRL. The Root CA's compromise means every certificate in the hierarchy must be replaced.")
-
-    h2(doc, "3.3  ADCS ESC Vulnerabilities")
-    cite(doc,
-         "Active Directory Certificate Services (ADCS) misconfigurations create a category of privilege escalation attacks catalogued as ESC1 through ESC8. These were detailed in the 'Certified Pre-Owned' research by SpecterOps.",
-         [11])
-    key_term(doc, "ESC1", "Certificate template allows enrollee to supply Subject Alternative Name (SAN) + Client Auth EKU + wide enrollment rights. Attacker can request certificate for any user including Domain Admin.", 11)
-    key_term(doc, "ESC2", "Certificate template has 'Any Purpose' EKU — can be used for any purpose including client authentication.", 11)
-    key_term(doc, "ESC3", "Certificate template has Certificate Request Agent EKU — allows enrolling on behalf of another user.", 11)
-    key_term(doc, "ESC8", "ADCS web enrollment (certsrv) accessible over HTTP. NTLM relay attack allows coercing a machine to authenticate and relaying that credential to ADCS to request a certificate.", 11)
-    analogy_box(doc,
-        "The Rubber Stamp Office",
-        "ESC1 is like a rubber stamp office that lets you write whatever name you want on the form before they stamp it. You walk in claiming to be 'Domain Administrator', they stamp your certificate, and suddenly every door in the building opens for you.")
-
-    h2(doc, "3.4  Certificate Revocation")
-    cite(doc,
-         "Two revocation mechanisms exist: CRL (batch, published periodically) and OCSP (Online Certificate Status Protocol — real-time per-certificate query). OCSP Stapling improves privacy by having the server pre-fetch and cache the OCSP response, including it in the TLS handshake so clients don't need to contact the CA directly.",
-         [22])
-
-    self_check(doc, [
-        "Explain the certificate chain for a leaf TLS certificate on a public website. Name each certificate in the chain.",
-        "Why must the Root CA be kept offline? What is the impact if it is compromised?",
-        "Describe the ESC1 attack. What three conditions must be true for it to be exploitable?",
-        "What is the difference between CRL and OCSP? When would you choose OCSP Stapling?",
-        "What does CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT mean, and why is it dangerous?"
-    ])
-    interview_box(doc, [
-        "Walk me through the ADCS ESC1 attack chain from initial enumeration to Domain Admin.",
-        "Your organisation's Root CA certificate expires in 6 months. What is your remediation plan?",
-        "What is OCSP Stapling and why does it improve both performance and privacy?",
-        "How would you audit your ADCS environment for misconfigured certificate templates?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_04(doc):
-    h1(doc, "Chapter 4: Federation Protocols — SAML, OAuth 2.0, and OIDC")
-    cite(doc,
-         "Modern identity federation separates authentication from application logic. Rather than each application maintaining its own credential store, federation delegates authentication to a trusted Identity Provider. Three protocols dominate enterprise federation: SAML 2.0 (XML-based, enterprise SSO), OAuth 2.0 (delegated authorisation framework), and OpenID Connect (OIDC — identity layer on OAuth 2.0).",
-         [3, 4, 5, 21])
-
-    h2(doc, "4.1  SAML 2.0")
-    analogy_box(doc,
-        "The Letter of Introduction",
-        "SAML is like a formal letter of introduction. Your employer (IdP) writes a letter saying 'This is Alice, she works in Finance, she has read access.' You carry that letter (SAML Assertion) to the hotel (SP). The hotel doesn't need to call your employer — it trusts the letter because it knows the employer's signature (cryptographic signature).")
-    cite(doc,
-         "SAML 2.0 (Security Assertion Markup Language) is an XML-based protocol for exchanging authentication and authorisation data between an IdP and SP. The SAML Assertion contains three statement types: AuthnStatement (who authenticated, when, by what method), AttributeStatement (user attributes), and AuthzDecisionStatement (access decision). The Assertion is signed using XML-DSIG with the IdP's private key.",
-         [5])
-    key_term(doc, "SAML Assertion", "XML document asserting information about a subject. Contains: Issuer, Subject (NameID), Conditions (NotBefore/NotOnOrAfter), AuthnStatement, AttributeStatement, and Signature.", 5)
-    key_term(doc, "Service Provider-Initiated (SP-init)", "User accesses SP → SP generates AuthnRequest → redirects to IdP → IdP authenticates → sends Assertion to SP via browser POST/redirect.", 5)
-    key_term(doc, "IdP-Initiated SSO", "User starts at IdP portal → selects application → IdP sends unsolicited Assertion to SP. Less secure: no AuthnRequest means no CSRF protection nonce.", 5)
-
-    h2(doc, "4.2  OAuth 2.0")
-    analogy_box(doc,
-        "The Valet Parking Ticket",
-        "OAuth 2.0 is about delegation, not identity. When you give your car to a valet, you hand over a valet key (access token) — not your house key (credentials). The valet can drive the car (access the resource) but can't start your home alarm (scope-limited). You didn't give them your identity — you gave them scoped, time-limited permission.")
-    cite(doc,
-         "OAuth 2.0 [RFC 6749] is an authorisation framework, not an authentication protocol. It allows a user (Resource Owner) to grant a third-party application (Client) limited access to their data at a Resource Server, without sharing credentials. The Client obtains an Access Token from the Authorisation Server using one of four grant types.",
-         [3])
-    key_term(doc, "Authorisation Code + PKCE", "Recommended grant for user-facing applications. PKCE (Proof Key for Code Exchange) [RFC 7636] prevents authorisation code interception attacks by binding the code to a cryptographic verifier known only to the initiating client.", 3)
-    key_term(doc, "Client Credentials", "Machine-to-machine grant. No user involved. Service authenticates directly to token endpoint using client_id + client_secret (or certificate). Returns access token scoped to the service's permissions.", 3)
-    key_term(doc, "Access Token", "A credential representing the authorisation granted to the client. Typically a JWT. Scoped (contains 'scope' claim), time-limited (exp claim), and audience-constrained (aud claim).", 4)
-
-    h2(doc, "4.3  OpenID Connect (OIDC)")
-    cite(doc,
-         "OpenID Connect [OpenID Foundation, 2014] adds an identity layer on top of OAuth 2.0. OIDC introduces the ID Token — a JWT containing claims about the authenticated user (sub, iss, aud, iat, exp, nonce). The UserInfo endpoint provides additional attributes. OIDC enables SSO while OAuth 2.0 provides API authorisation.",
-         [21])
-    key_term(doc, "ID Token", "A JWT asserting the user's identity. Must be validated: signature (RS256/ES256), issuer (iss == IdP), audience (aud == client_id), expiry (exp > now), nonce (matches original request).", 21)
-    key_term(doc, "sub Claim", "Subject identifier — a stable, unique, opaque identifier for the user within the IdP. Do not use email as subject — it can change.", 21)
-
-    h2(doc, "4.4  JWT Anatomy and Validation")
-    analogy_box(doc,
-        "The Signed Cheque",
-        "A JWT is like a signed cheque: it contains the payee (aud), the amount (scope/claims), the date (iat/exp), and the bank's signature (RS256 signature). Anyone can read the cheque (it's base64-encoded, not encrypted). But only the bank's genuine signature makes it valid. A cheque that's expired (exp in the past) or has been altered (signature mismatch) is worthless.")
-    cite(doc,
-         "A JWT [RFC 7519] consists of three base64url-encoded parts separated by dots: Header.Payload.Signature. Header specifies the algorithm (alg: RS256) and key ID (kid). Payload contains claims. Signature is computed over Header+Payload using the IdP's private key. NEVER accept 'none' algorithm — this is a well-known attack that skips signature verification entirely.",
-         [4])
-
-    self_check(doc, [
-        "Draw the SAML SP-initiated SSO flow, naming every message and the direction it travels.",
-        "Why is OAuth 2.0 not an authentication protocol? What problem does it actually solve?",
-        "List the five validations that must be performed on an ID Token before trusting it.",
-        "What is PKCE, and what specific attack does it prevent in the Authorisation Code flow?",
-        "What is the 'none algorithm' attack on JWTs, and how do you prevent it?"
-    ])
-    interview_box(doc, [
-        "A developer asks why they should use OIDC instead of SAML for a new SPA. What is your recommendation?",
-        "Walk me through the difference between an ID Token and an Access Token.",
-        "What claims would you check to validate that a JWT was not tampered with?",
-        "Explain the Authorisation Code + PKCE flow from browser to token issuance."
-    ])
-    doc.add_page_break()
-
-
-def chapter_05(doc):
-    h1(doc, "Chapter 5: Privileged Access Management")
-    cite(doc,
-         "Privileged Access Management (PAM) is the set of controls, processes, and technologies that govern the use of elevated permissions. Privileged accounts — Domain Admins, root accounts, database administrators, service accounts — represent the highest-value targets for attackers. A compromised privileged account typically means full domain or cloud tenant compromise.",
-         [19, 17])
-
-    h2(doc, "5.1  The PAM Problem")
-    analogy_box(doc,
-        "The Master Key",
-        "A privileged account is like the building's master key. In a well-run building, the master key is kept in a locked box, checked out only with a log entry and a reason, checked back in immediately after use, and the lock is changed if it's ever lost. In most enterprises without PAM, the master key is photocopied and hanging on 15 people's lanyards.")
-    cite(doc,
-         "The Verizon DBIR consistently shows that credential abuse is the #1 initial access vector. Privileged credential abuse is the #1 path to full compromise. The three problems PAM solves: (1) Standing access — privileged accounts that are always active, always exposed. (2) Shared credentials — multiple admins share a single admin password with no accountability. (3) No session accountability — no recording of what was done with privileged access.",
-         [19])
-
-    h2(doc, "5.2  CyberArk Architecture")
-    cite(doc,
-         "CyberArk Privileged Access Security (PAS) is the market-leading PAM platform for enterprise environments. Core components: Digital Vault (encrypted credential store), Central Policy Manager (CPM — automated password rotation), Privileged Session Manager (PSM — session proxy with recording), Application Identity Manager (AIM — eliminates hardcoded credentials in applications).",
-         [19])
-    key_term(doc, "Digital Vault", "Encrypted credential repository. Credentials never leave the vault in cleartext — PSM injects them directly into sessions without exposing them to the user.", 19)
-    key_term(doc, "PSM (Privileged Session Manager)", "Session proxy that brokers connections to target systems. The administrator connects to PSM; PSM connects to the target using the vaulted credential. The admin never sees the password. Sessions are recorded.", 19)
-    key_term(doc, "CPM (Central Policy Manager)", "Automated password rotation engine. Rotates passwords on schedule or on-demand. Verifies credentials after rotation. Handles platform-specific rotation (Windows, Linux, Oracle, MSSQL, network devices).", 19)
-
-    h2(doc, "5.3  Azure PIM — Just-in-Time Privileged Access")
-    analogy_box(doc,
-        "The Surgeon's Scrub-In",
-        "Azure PIM is like surgical scrub-in. The surgeon doesn't walk around the hospital with sterile gloves on all day — that would be wasteful and would constantly contaminate the gloves. She scrubs in (activates the role), performs the operation (completes the task), and scrubs out (deactivates). The sterile environment is only maintained for as long as needed.")
-    cite(doc,
-         "Azure AD Privileged Identity Management (PIM) implements Just-in-Time (JIT) access for Entra ID roles. Users are assigned as 'eligible' rather than 'permanently active'. To use a privileged role, the user activates it — triggering MFA, justification entry, and optionally manager approval. The role is active for a defined window (1-8 hours) then automatically deactivates.",
-         [8])
-    key_term(doc, "Eligible Assignment", "User can request activation of the role but is not permanently active. Safest configuration for privileged roles.", 8)
-    key_term(doc, "Active Assignment", "User is permanently in the role — no activation required. Should be reserved for break-glass accounts or service accounts only.", 8)
-
-    h2(doc, "5.4  Windows LAPS")
-    cite(doc,
-         "Local Administrator Password Solution (LAPS) manages unique, rotated local administrator passwords for every domain-joined machine. Without LAPS, a common pattern is the same local admin password across all machines — a single credential compromise enables lateral movement to every endpoint. LAPS stores the password in AD (Legacy LAPS: ms-Mcs-AdmPwd; Windows LAPS: msLAPS-Password), protected by ACL.",
-         [17])
-
-    h2(doc, "5.5  Break-Glass Accounts")
-    analogy_box(doc,
-        "The Fire Extinguisher Case",
-        "Break-glass accounts are like fire extinguisher cases — they must be immediately accessible in an emergency but sealed under normal conditions. Breaking the glass (using the account) is an immediate alarm. In Azure, break-glass accounts should be: cloud-only (not synced — can't be affected by on-prem outage), FIDO2-only (can't be phished), excluded from CA policies (can always sign in), and monitored so any sign-in triggers a P0 alert.")
-
-    self_check(doc, [
-        "What are the three main problems PAM solves? Give a concrete example of each.",
-        "Explain the difference between CyberArk's CPM and PSM. When does each activate?",
-        "What is the difference between 'eligible' and 'active' PIM assignment? When is 'active' appropriate?",
-        "A breach investigation reveals a lateral movement path from a compromised workstation to 40 servers all using the same local admin password. How would LAPS have prevented this?",
-        "List the four properties a break-glass account must have and explain why each matters."
-    ])
-    interview_box(doc, [
-        "A vendor VPN account was used in a ransomware attack with a 14-day dwell time. How would CyberArk PSM have changed the outcome?",
-        "Walk me through how JIT access works in Azure PIM from the user's perspective and the audit trail it creates.",
-        "What is the LAPS attribute in Active Directory, and what ACL should protect it?",
-        "How do you design a break-glass account strategy for an Entra ID tenant?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_06(doc):
-    h1(doc, "Chapter 6: Zero Trust Architecture")
-    cite(doc,
-         "Zero Trust is an architectural philosophy, not a product. Its core principle: 'Never trust, always verify.' Rather than assuming that anything inside the network perimeter is safe, Zero Trust treats every access request as if it originates from an untrusted network — regardless of source IP address, network segment, or prior authentication.",
-         [2, 6])
-
-    h2(doc, "6.1  NIST SP 800-207 Tenets")
-    cite(doc,
-         "NIST SP 800-207 defines seven tenets of Zero Trust that together eliminate implicit trust from the network model.",
-         [2])
-    bullet(doc, "All data sources and computing services are resources (including personal devices on corporate networks).")
-    bullet(doc, "All communication is secured regardless of network location (TLS everywhere, mTLS for east-west).")
-    bullet(doc, "Access to individual enterprise resources is granted per-session (no standing network access).")
-    bullet(doc, "Access is determined by dynamic policy including observable state of client identity, application, and requesting asset.")
-    bullet(doc, "The enterprise monitors and measures the integrity and security posture of all owned and associated assets.")
-    bullet(doc, "All resource authentication and authorisation are dynamic and strictly enforced before access is allowed.")
-    bullet(doc, "The enterprise collects as much information as possible about the current state of assets, network infrastructure, and communications.")
-
-    h2(doc, "6.2  CISA Zero Trust Maturity Model")
-    analogy_box(doc,
-        "The Security Belt System",
-        "The CISA ZT Maturity Model works like a martial arts belt system. Traditional (white belt): castle-and-moat, VPN, perimeter trust. Advanced (coloured belt): MFA deployed, some device compliance, identity-based CA policies. Optimal (black belt): every access decision is contextual, continuous, and automated across all five pillars simultaneously.")
-    cite(doc,
-         "The CISA Zero Trust Maturity Model v2.0 defines five pillars and three maturity stages (Traditional, Advanced, Optimal). The five pillars are: Identity, Device, Network, Application, and Data. Progress in each pillar is independent — an organisation can be Optimal in Identity and Traditional in Data.",
-         [6])
-
-    h2(doc, "6.3  Conditional Access — Tiered Model")
-    cite(doc,
-         "Microsoft's Conditional Access (CA) is the Zero Trust policy engine for Entra ID. A tiered CA policy framework provides defence in depth: no single policy covers all scenarios, and each tier addresses a specific threat class.",
-         [8])
-    key_term(doc, "Tier B (Baseline)", "Block legacy authentication; require MFA for all users. Non-negotiable minimum. Blocks credential stuffing and password spray that rely on legacy auth protocols (IMAP, POP3, SMTP AUTH).", 8)
-    key_term(doc, "Tier I (Identity Protection)", "Sign-in risk ≥ Medium → require MFA; User risk High → require password change. Requires Entra ID P2. Integrates Microsoft's threat intelligence to step up authentication on suspicious signals.", 8)
-    key_term(doc, "Tier D (Device)", "Require Intune-compliant device for sensitive applications; session controls for unmanaged devices. BYOD scenario: allow access via browser with limited download/print capability.", 8)
-    key_term(doc, "Tier P (Privileged)", "Admin roles require phishing-resistant MFA (FIDO2/smart card) + PAW location requirement. Prevents credential phishing from affecting privileged accounts.", 8)
-
-    h2(doc, "6.4  Continuous Access Evaluation (CAE)")
-    analogy_box(doc,
-        "The Library Book Scanner",
-        "Traditional token-based auth is like borrowing a library book on Monday — you can keep it until the due date (token expiry) regardless of what happens at the library. CAE is like the library installing a continuous-scan system: if the book is reported stolen (account disabled), or the library changes policy (risk level changes), your access is revoked mid-loan rather than waiting for renewal.")
-    cite(doc,
-         "CAE extends token lifetime to up to 28 hours (vs. the traditional 60-90 minutes) while enabling near-real-time revocation. CAE-capable resources (Exchange Online, SharePoint, Teams) maintain a long-lived session, but if the IdP signals a critical event (password change, account disable, location change, risk elevation), the resource rejects the current token within seconds via HTTP 401 claims challenge.",
-         [20])
-
-    self_check(doc, [
-        "State the Zero Trust principle in one sentence and explain what 'implicit trust' means in a traditional perimeter model.",
-        "Name the five CISA Zero Trust pillars and give one control per pillar at the Optimal maturity level.",
-        "What is the difference between a Tier B and Tier I Conditional Access policy?",
-        "How does CAE differ from traditional token-based authentication? What is the maximum token lifetime under CAE?",
-        "A user's account is disabled at 9:00 AM. With CAE enabled, when will their Outlook session stop working?"
-    ])
-    interview_box(doc, [
-        "Your CISO asks: 'We just deployed MFA — are we Zero Trust now?' How do you respond?",
-        "What is Continuous Access Evaluation, and how does it change incident response for a compromised account?",
-        "Walk me through the tiered Conditional Access model you would deploy for a 10,000-user enterprise.",
-        "How does Zero Trust change the value of network segmentation?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_07(doc):
-    h1(doc, "Chapter 7: Identity Governance and Administration")
-    cite(doc,
-         "Identity Governance and Administration (IGA) is the discipline of managing the full identity lifecycle — who has access to what, for how long, and whether that access is still appropriate. IGA transforms identity management from a reactive IT function into a proactive, auditable governance programme.",
-         [18, 17])
-
-    h2(doc, "7.1  IGA vs. IAM")
-    analogy_box(doc,
-        "The Staffing Agency vs. The Security Guard",
-        "IAM is the security guard at the door — it authenticates and enforces access in real time. IGA is the staffing agency that decided who should be allowed in the building, reviewed those decisions quarterly, and revokes the badge when the contract ends. Without IGA, IAM is enforcing decisions that were never reviewed — a guard following a guest list that was written three years ago and never updated.")
-    cite(doc,
-         "IAM enforces access; IGA governs it. IGA capabilities: provisioning/deprovisioning automation (JML), access request and approval workflows, Segregation of Duties (SoD) policy enforcement, role management (role mining, RBAC), access certification campaigns, and audit evidence generation for SOX/HIPAA/PCI compliance.",
-         [18])
-
-    h2(doc, "7.2  JML Automation and SLAs")
-    cite(doc,
-         "JML (Joiner-Mover-Leaver) automation is the primary business value of IGA. Key SLAs: Joiner access fully provisioned ≤ 2 hours from HR trigger. Mover entitlement change ≤ 4 hours from HR role change. Leaver all access revoked ≤ 4 hours from HR termination event (privileged access ≤ 1 hour).",
-         [18, 25])
-
-    h2(doc, "7.3  Segregation of Duties (SoD)")
-    analogy_box(doc,
-        "The Four-Eyes Principle",
-        "SoD is the four-eyes principle applied to entitlements. In financial controls, the person who creates a vendor (AP-Create-Vendor) cannot also approve payments to that vendor (AP-Approve-Payment) — because they could create a fictitious vendor and pay themselves. SoD matrix: every pair of roles that, if held simultaneously, creates a fraud or error risk.")
-    cite(doc,
-         "SoD defines role pairs that must not be held by the same person. Critical SoD conflicts require immediate remediation (no compensating control acceptable). High SoD conflicts can be mitigated with enhanced monitoring and quarterly review. SoD violations are a primary audit finding for SOX ITGC access controls.",
-         [18, 25])
-
-    h2(doc, "7.4  SCIM 2.0 Protocol")
-    cite(doc,
-         "System for Cross-domain Identity Management (SCIM) 2.0 [RFC 7644] is the standard protocol for automating user provisioning between identity systems and SaaS applications. SCIM defines REST API endpoints (/Users, /Groups), JSON schema (core attributes + extensions), and operations (POST Create, GET Read, PATCH Update, DELETE).",
-         [13])
-    key_term(doc, "externalId", "The IGA system's internal ID for the user, stored in the SaaS application. Used to find the correct user record during subsequent sync operations. Must round-trip correctly through SCIM.", 13)
-    key_term(doc, "SCIM Provisioning vs. SSO", "SCIM handles account lifecycle (create/update/delete). SSO handles authentication. Both are needed: SCIM provisions the account; SSO lets the user log in. They are complementary, not interchangeable.", 13)
-
-    h2(doc, "7.5  Access Certification")
-    cite(doc,
-         "Access certification (also called access review or access recertification) is a periodic process where managers or data owners review and certify that users still need their current access. Regulatory requirements: SOX ITGC requires at least annual certification of privileged access. HIPAA requires periodic review of access to PHI systems. PCI DSS requires quarterly review of access to cardholder data environments.",
-         [24, 25])
-
-    self_check(doc, [
-        "What is the difference between IGA and IAM? Give an example of where each is operating.",
-        "A terminated employee still has access 6 hours after termination. Which SLA was breached, and what is the first investigation step?",
-        "Define Segregation of Duties. Give two examples of SoD conflicts from finance and healthcare.",
-        "What HTTP methods does SCIM 2.0 use for Create, Read, Update, and Delete?",
-        "What is the difference between a certification campaign and an access request workflow?"
-    ])
-    interview_box(doc, [
-        "Walk me through the automated Leaver process from HR termination event to full access revocation.",
-        "How does SoD conflict detection work in a large enterprise with 400 applications and 85,000 users?",
-        "What is SCIM, and why is externalId round-trip important?",
-        "How would you measure the effectiveness of an access certification programme?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_08(doc):
-    h1(doc, "Chapter 8: Microsoft Entra ID — Cloud Identity")
-    cite(doc,
-         "Microsoft Entra ID (formerly Azure Active Directory) is the cloud identity platform serving over 400 million users. It is the primary identity control plane for Microsoft 365, Azure, and thousands of federated SaaS applications. For most enterprise IAM architects, Entra ID is the hub through which all modern identity flows.",
-         [8, 16])
-
-    h2(doc, "8.1  Hybrid Identity — PHS vs. AD FS")
-    analogy_box(doc,
-        "The Phone Line vs. The Relay Station",
-        "PHS (Password Hash Sync) is like a phone line directly to the cloud — even if your office building burns down (on-prem AD goes offline), calls still go through because the number was already ported. AD FS is a relay station in your office: if the station goes down, no calls get through. Every WAN outage, every AD FS server patch, is a cloud authentication outage.")
-    cite(doc,
-         "Three hybrid authentication models: PHS (Password Hash Sync) — Entra Connect syncs password hashes to cloud; authentication happens in Entra ID, not on-prem. PTA (Pass-Through Authentication) — authentication happens on-prem via agent, but cloud directs traffic. AD FS — full on-prem federation server; cloud redirect to on-prem for every authentication. PHS is the recommended model for resilience: on-prem outage does not affect cloud authentication.",
-         [16])
-    key_term(doc, "Entra Connect", "The synchronisation engine that replicates on-prem AD objects to Entra ID. Manages directory sync, password hash sync, and attribute mapping. The MSOL_ service account it creates is a Tier 0 asset.", 8)
-    key_term(doc, "Seamless SSO", "Automatically signs users in when they're on corporate network. Uses Kerberos AZUREADSSO computer account ticket to authenticate to Entra ID without password prompt.", 8)
-
-    h2(doc, "8.2  App Registrations vs. Enterprise Applications")
-    analogy_box(doc,
-        "The Blueprint vs. The Building",
-        "An App Registration is the blueprint — it defines the application identity, permissions it needs, and redirect URIs. The Enterprise Application (Service Principal) is the actual building constructed from that blueprint in your tenant. Multi-tenant apps have one App Registration (in the developer's tenant) and many Enterprise Apps (one per customer tenant).")
-    cite(doc,
-         "App Registration: defines the application's identity in the developer's home tenant. Contains client secrets, certificates, API permissions, and redirect URIs. Enterprise Application (Service Principal): the instantiation of an App Registration in a specific tenant. Controls user assignment, SSO configuration, and provisioning settings for that tenant.",
-         [8])
-
-    h2(doc, "8.3  Managed Identity")
-    cite(doc,
-         "Managed Identities eliminate the need for application developers to manage credentials. An Azure resource (VM, App Service, Function) is assigned a system-managed or user-managed identity backed by a service principal in Entra ID. The resource can then obtain tokens from the Instance Metadata Service (IMDS) at 169.254.169.254 without any credentials stored in code or configuration.",
-         [8])
-    note_box(doc, "Security Principle",
-             "Managed Identity is the correct pattern for any Azure workload accessing another Azure service (Storage, Key Vault, SQL). If you see a connection string with a password in application config, that is a finding. Replace with Managed Identity token acquisition.")
-
-    h2(doc, "8.4  Microsoft Graph API")
-    cite(doc,
-         "Microsoft Graph is the unified REST API surface for all Microsoft 365 and Entra ID data. Identity operations: user lifecycle management, group management, sign-in logs, audit logs, Conditional Access policies, risk events. Graph supports delta queries — after an initial full sync, subsequent queries return only objects changed since the last delta link, enabling efficient incremental synchronisation.",
-         [8])
-
-    self_check(doc, [
-        "Why is PHS recommended over AD FS for hybrid identity resilience? What specific failure scenario does it address?",
-        "What is the difference between an App Registration and an Enterprise Application (Service Principal)?",
-        "What is the Tier 0 risk associated with the Entra Connect MSOL_ account?",
-        "How does a Managed Identity obtain an access token? What endpoint does it use?",
-        "What is a Graph delta query, and why is it more efficient than a full sync?"
-    ])
-    interview_box(doc, [
-        "A developer has hardcoded a client secret in their application to access Azure Storage. How do you remediate this?",
-        "Walk me through the App Registration audit findings you would look for in a security review.",
-        "Explain PHS vs. PTA vs. AD FS and when you would choose each.",
-        "How would you detect a compromised Entra Connect sync account using Sentinel?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_09(doc):
-    h1(doc, "Chapter 9: Auth0 CIAM Platform")
-    cite(doc,
-         "Customer Identity and Access Management (CIAM) addresses the unique requirements of consumer-facing applications: massive scale (millions of users), social login, frictionless UX, and progressive profiling. Auth0 (now part of Okta) is the leading developer-centric CIAM platform, widely adopted for its extensibility via Actions and its B2B multi-tenancy via Organizations.",
-         [9])
-
-    h2(doc, "9.1  Auth0 Tenant Architecture")
-    analogy_box(doc,
-        "The Apartment Building",
-        "An Auth0 tenant is like an apartment building. The building has shared infrastructure (plumbing, elevator, security desk) that all apartments use. Each apartment (application) has its own décor, rules, and entry code. The security desk (Universal Login) is what everyone sees — but the building manager can customise it per floor if needed.")
-    cite(doc,
-         "An Auth0 tenant is the top-level container for all identity configuration. One tenant per environment (dev/staging/prod) is the recommended pattern. Within a tenant: Applications (clients — SPA, Regular Web App, Native, M2M), APIs (resource servers defining scopes), Connections (user stores — database, social, enterprise, passwordless), and Actions (serverless extensibility pipeline).",
-         [9])
-
-    h2(doc, "9.2  Universal Login — Classic vs. New")
-    cite(doc,
-         "Auth0 Universal Login is the hosted login page that handles authentication flows. New Universal Login (recommended): React-based, supports all Auth0 features including Passkeys, Device Flow, and MFA. Classic Universal Login (deprecated path): Customisable HTML templates with Lock.js widget. Auth0 strongly recommends migrating to New Universal Login for all new implementations.",
-         [9])
-
-    h2(doc, "9.3  Auth0 Actions Pipeline")
-    analogy_box(doc,
-        "The Airport Security Checkpoint",
-        "Auth0 Actions are like a sequence of airport security checkpoints. Each checkpoint (Action) can inspect your passport (user profile and login context), add a stamp (custom claim), redirect you to a different queue (MFA challenge), or deny entry (block the login). You pass through each checkpoint in order, and each checkpoint's decision affects the next.")
-    cite(doc,
-         "Auth0 Actions are serverless Node.js functions that execute at specific points in the auth pipeline. Post-Login Actions are the most common: they can set custom claims on ID tokens and access tokens, enforce MFA based on context, log to external systems, and enrich profiles from external APIs. Actions replaced the deprecated Rules and Hooks system.",
-         [9])
-    key_term(doc, "Custom Claims Namespacing", "Auth0 requires custom claims in ID/access tokens to use a URI namespace (e.g., https://yourapp.com/department). This prevents collision with OIDC standard claims and ensures spec compliance.", 9)
-
-    h2(doc, "9.4  Organizations (B2B Multi-Tenancy)")
-    cite(doc,
-         "Auth0 Organizations provides native B2B multi-tenancy. Each Organization represents a customer tenant with its own branding, connections, and member roles. The org_id claim in the access token scopes API requests to the correct tenant. SECURITY CRITICAL: Always validate org_id server-side on the API — never trust client-provided tenant context.",
-         [9])
-
-    h2(doc, "9.5  Lazy Migration Pattern")
-    analogy_box(doc,
-        "The Hotel Key Card Update",
-        "Lazy migration is like upgrading hotel key cards without telling guests to come to the desk. The old card (legacy credential in the old system) still works until you actively use it — then the system transparently upgrades it to the new format (migrates to Auth0) and you never notice. Users who never return never need to be migrated at all.")
-    cite(doc,
-         "Lazy (progressive) migration moves users from a legacy credential store to Auth0 on first login, without requiring a big-bang migration or forced password reset. Auth0 Custom Database connection: Login script checks Auth0 DB first; if not found, falls back to legacy DB; on successful legacy auth, migrates user to Auth0. Import Users mode: once migrated, Auth0 is authoritative and legacy DB is no longer consulted.",
-         [9])
-
-    self_check(doc, [
-        "What is the difference between Auth0 Rules (deprecated) and Actions? What are the three pipeline trigger points?",
-        "Why must custom JWT claims use a namespaced URI? What problem does this solve?",
-        "Explain the lazy migration pattern. What happens to users who never return to the application?",
-        "What is the org_id claim, and why is server-side validation of it critical?",
-        "What is the M2M Client Credentials flow, and why is token caching important?"
-    ])
-    interview_box(doc, [
-        "A company is migrating 3.8 million patient portal accounts from a PHP application to Auth0. Walk me through the migration strategy.",
-        "How would you implement adaptive MFA in Auth0 that triggers based on the user's country?",
-        "What is the Auth0 Organizations feature, and how does it enable B2B SaaS multi-tenancy?",
-        "Why does Auth0 charge per M2M token, and how does token caching address this?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_10(doc):
-    h1(doc, "Chapter 10: Zero Trust Implementation with Microsoft Defender XDR")
-    cite(doc,
-         "Microsoft Defender XDR (Extended Detection and Response) integrates Defender for Identity (on-prem AD), Defender for Endpoint (devices), Defender for Office 365 (email), Microsoft Sentinel (SIEM), and Entra ID Protection (cloud identity risk) into a unified security operations platform. The XDR model correlates signals across the kill chain to detect and respond to attacks that span identity, endpoint, and network.",
-         [8, 30])
-
-    h2(doc, "10.1  Entra ID Protection")
-    analogy_box(doc,
-        "The Credit Card Fraud Department",
-        "Entra ID Protection works like a credit card fraud department. Every transaction (sign-in) is scored in real time against a model trained on billions of transactions. Unusual location at 3 AM? Flagged. Known botnet IP? Blocked. You don't see most of this — only when the score crosses a threshold does the system intervene, just like your credit card gets declined when the fraud score spikes.")
-    cite(doc,
-         "Entra ID Protection uses machine learning trained on Microsoft's global threat intelligence to score sign-in risk (per-session) and user risk (aggregate account risk). Sign-in risk detections: unfamiliar sign-in properties, anonymous IP, malware-linked IP, impossible travel, password spray. User risk detections: leaked credentials, suspicious activity patterns.",
-         [8])
-    key_term(doc, "Sign-in Risk", "Risk score for a specific authentication event. Calculated in real time at token issuance. Triggers Conditional Access 'Tier I' policies to step up authentication or block.", 8)
-    key_term(doc, "User Risk", "Aggregate risk score for an account based on all sign-in activity and detected anomalies. A High-risk user should be forced to change password and reset MFA.", 8)
-
-    h2(doc, "10.2  Microsoft Defender for Identity (MDI)")
-    cite(doc,
-         "Microsoft Defender for Identity deploys lightweight sensors on domain controllers to monitor on-premises AD traffic. MDI detects identity-based attacks in real time: Kerberoasting (bulk TGS-REQ with RC4 encryption), DCSync (unauthorised replication requests), Pass-the-Hash, Golden Ticket, and reconnaissance (LDAP enumeration). MDI alerts integrate directly into Defender XDR incidents.",
-         [8, 12])
-
-    h2(doc, "10.3  Microsoft Sentinel KQL Analytics")
-    cite(doc,
-         "Microsoft Sentinel is a cloud-native SIEM/SOAR platform built on Azure Log Analytics. Analytics rules use KQL (Kusto Query Language) to detect threats across SigninLogs, AuditLogs, SecurityEvent, and other data sources. Key rule categories: impossible travel (geographically inconsistent sign-ins), mass modification (bulk user changes), privileged role assignment, DCSync detection.",
-         [30])
-    note_box(doc, "KQL Pattern — Impossible Travel",
-             "SigninLogs | where TimeGenerated > ago(1h) | where ResultType == 0 | extend Country = tostring(LocationDetails.countryOrRegion) | summarize Countries = make_set(Country), Count = count() by UserPrincipalName | where array_length(Countries) > 1")
-
-    h2(doc, "10.4  Attack Disruption — Autonomous Response")
-    cite(doc,
-         "Defender XDR Attack Disruption is an autonomous incident response capability that can contain attacks in progress without waiting for analyst intervention. For BEC (Business Email Compromise) and ransomware scenarios: automatically disables compromised user accounts, blocks malicious IP addresses, and isolates compromised devices — all within seconds of detection, dramatically reducing dwell time.",
-         [8])
-
-    self_check(doc, [
-        "What is the difference between Sign-in Risk and User Risk in Entra ID Protection?",
-        "What protocol does MDI monitor on domain controllers, and what specific attack does Event 4769 RC4 indicate?",
-        "What is Attack Disruption, and how does it differ from a traditional SOC response workflow?",
-        "Write a KQL query that detects when more than 5 Service Ticket requests with RC4 encryption come from the same IP in 15 minutes.",
-        "What is MTTD and MTTR, and what are realistic Zero Trust target values?"
-    ])
-    interview_box(doc, [
-        "How does Microsoft Defender XDR correlate signals across identity, endpoint, and email to detect BEC?",
-        "Walk me through the Sentinel KQL rule you would write to detect DCSync attacks.",
-        "A user's account shows High sign-in risk. Walk me through the automated Conditional Access response and manual investigation steps.",
-        "What is the value of CAE from an incident response perspective when a credential is compromised?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_11(doc):
-    h1(doc, "Chapter 11: Capstone — Vertex Health Systems Architecture")
-    cite(doc,
-         "This capstone chapter presents a complete, production-grade IAM architecture for Vertex Health Systems — a fictional regional health system designed to represent the complexity, legacy debt, and regulatory requirements of real large healthcare organisations. All eight major IAM design decisions are documented as Architecture Decision Records (ADRs).",
-         [10, 24])
-
-    h2(doc, "11.1  Organisation Profile and Problem Statement")
-    cite(doc,
-         "Vertex Health Systems: 85,000 employees across 28 hospitals and 340 outpatient clinics. 4.2 million patient portal accounts. $12.4 billion annual revenue. The programme trigger: a supply chain ransomware near-miss — a vendor VPN account with no MFA, 14-day dwell time before detection, active exfiltration of 340,000 patient records.",
-         [24, 10])
-    body(doc, "Starting state: 4 AD forests, 18 domains (legacy hospital acquisitions), Oracle OAM federation (end-of-life in 18 months), homegrown PHP patient portal, no PAM, no IGA, no MFA for most users, mixed PKI with expired certificates on internal applications.")
-
-    h2(doc, "11.2  Architecture Decision Records")
-    analogy_box(doc,
-        "The Architect's Decision Log",
-        "An ADR (Architecture Decision Record) is an architect's decision journal. It records not just what was decided, but why — and critically, what alternatives were considered and rejected. Future engineers reading the ADR understand the constraints that shaped the design. Without ADRs, engineers inherit a system with no explanation of why it was built this way, leading to ill-informed changes that break assumptions the original architect never documented.")
-    cite(doc,
-         "The IAM-ADR Framework evaluates every major decision across seven forces: Security (threat model), Usability (user experience friction), Compliance (regulatory requirements), Operability (team capacity), Scalability (user/transaction volume), Cost (budget constraints), and Vendor lock-in (exit risk). Each ADR documents: Context, Decision, Rationale, Consequences (positive/negative/neutral), and Review Date.",
-         [2])
-
-    key_term(doc, "ADR-02: PHS vs. AD FS",
-             "PHS chosen for Vertex Health. Rationale: 99.99% auth SLA impossible with AD FS across 28 hospitals on 1.5 Mbps WAN links. WAN outage = cloud auth outage with AD FS. PHS validates in cloud — WAN outage has zero impact on cloud authentication. Validated by two WAN outages during Month 4 and Month 11: PHS users unaffected.", 16)
-    key_term(doc, "ADR-07: Entra External ID vs. Auth0",
-             "Entra External ID chosen for patient portal CIAM. Rationale: HIPAA BAA for Auth0 requires Private Cloud deployment at 3–5x cost premium. Entra External ID provides HIPAA BAA on standard Azure US-region deployment within approved budget. Auth0 Private Cloud rejected on cost despite superior developer experience.", 9)
-
-    h2(doc, "11.3  Clinical Authentication — 8-Second SLA")
-    cite(doc,
-         "Clinical staff authentication SLA: 8 seconds from badge tap to EHR (Epic) access. Solution: HID proximity badge with PIV-compliant X.509 certificate → PKINIT (Kerberos + certificate) → TGT → Seamless SSO → Entra ID token → Epic EHR. Measured result: 3.7 seconds (LAN), 5.1 seconds (WAN). Both under SLA.",
-         [22, 15])
-
-    h2(doc, "11.4  Programme Outcomes")
-    cite(doc,
-         "Month 24 results: CISA ZT Identity Pillar — Optimal (from Traditional). MFA coverage — 97.2% (from 0%). Dwell time (MTTD) — 2.8 hours (from 14 days). Legacy auth sign-ins — 23/day (from ~12,400/day). Critical attack paths — 89 (from 847). HITRUST CSF certified. Cyber insurance renewed at Month 3 on proof of MFA deployment.",
-         [6, 10])
-
-    h2(doc, "11.5  HIPAA Security Rule Compliance Mapping")
-    cite(doc,
-         "HIPAA Security Rule §164.312 Technical Safeguards require: Access control (unique user IDs, emergency access, automatic logoff, encryption/decryption). Audit controls (hardware/software/procedural mechanisms to record activity). Integrity (PHI alteration/destruction protection). Authentication (verify person or entity seeking access). Transmission security (encryption of PHI in transit).",
-         [24])
-
-    self_check(doc, [
-        "What are the seven IAM architecture forces evaluated in the Vertex Health ADR framework?",
-        "Why was PHS chosen over AD FS for Vertex Health? What specific failure scenario made AD FS unacceptable?",
-        "Describe the clinical authentication flow from badge tap to Epic EHR access, naming each protocol used.",
-        "What is the difference between HITRUST CSF and HIPAA? Why did Vertex Health pursue both?",
-        "What was the highest-ROI security control implemented in the Vertex Health programme, and why?"
-    ])
-    interview_box(doc, [
-        "Walk me through an Architecture Decision Record. What sections does it contain, and why is the Rationale section the most important?",
-        "A healthcare client needs authentication in under 8 seconds for clinical staff. What architecture would you design?",
-        "HIPAA §164.312 requires 'unique user identification.' What identity controls satisfy this requirement?",
-        "How would you measure the ROI of a Zero Trust programme to a healthcare board?"
-    ])
-    doc.add_page_break()
-
-
-def chapter_12(doc):
-    h1(doc, "Chapter 12: AI Identity Security")
-    cite(doc,
-         "Artificial intelligence is transforming both the attack surface and the defensive capabilities of identity security. LLMs and AI agents introduce new identity patterns (AI workload identity, agent delegation), new attack vectors (prompt injection, AI-assisted SoD gaming), and new defensive tools (AI-assisted access review, anomaly detection). IAM architects must understand both sides.",
-         [7, 14])
-
-    h2(doc, "12.1  LLM Access Control Stack")
-    analogy_box(doc,
-        "The Bank Teller Window",
-        "An LLM handling sensitive queries is like a bank teller window. Before you can ask about your account, you must (1) show ID at the door (identity gate), (2) pass through the security checkpoint (API gateway with rate limiting), (3) speak to the teller who only sees information relevant to your account (context assembly with access-controlled RAG). The teller doesn't have keys to every vault — they see only what's appropriate for your query.")
-    cite(doc,
-         "The LLM access control stack has five layers: (1) Identity gate — authenticate the user before any query reaches the LLM. (2) API gateway — rate limiting, quota enforcement, token counting. (3) Context assembly — RAG retrieval with server-side document filtering (OData filter at search engine level, not in application code). (4) LLM inference — model processes only authorised context. (5) Output filter — scan response for injection artifacts or unauthorised content.",
-         [7, 14])
-    key_term(doc, "Server-Side RAG Filtering", "Document namespace filter applied at the vector search engine (e.g., Azure AI Search OData filter), not in application code post-retrieval. Critical: unauthorised documents must never reach application memory — server-side enforcement only.", 7)
-
-    h2(doc, "12.2  AI Agent Identity Patterns")
-    cite(doc,
-         "AI agents are autonomous programs that use LLMs to reason and take actions via tools. Four identity patterns: (1) Stateless — single-turn, no persistent identity. (2) Tool-using — has service principal, calls external APIs. (3) Persistent — maintains session state, long-running tasks. (4) Multi-agent — orchestrator spawns sub-agents with delegated permissions.",
-         [7])
-    key_term(doc, "Principle of Least Privilege for Agents", "AI agents should have the minimum permissions needed for their specific task. Read-only by default; write permissions require explicit business justification. Tool allowlist (not blocklist): the agent can only call tools explicitly granted, not all tools except blocked ones.", 7)
-    key_term(doc, "Agent Delegation Token", "A JWT issued by an orchestrator agent to a sub-agent, scoped to specific allowed_tools, with a short TTL (≤ 5 minutes). The sub-agent validates the token before acting.", 7)
-
-    h2(doc, "12.3  Prompt Injection — Taxonomy and Defence")
-    analogy_box(doc,
-        "The Forged Work Order",
-        "An indirect prompt injection attack is like a forged work order slipped into a contractor's inbox. The contractor (AI agent) reads all their emails (processes all data) and acts on instructions. A malicious party puts a fake work order in the pile — 'Install a backdoor in Room 401.' Unless the contractor verifies the source of every instruction, they may comply with the forged order.")
-    cite(doc,
-         "OWASP LLM01 — Prompt Injection: Attackers craft inputs that override the LLM's instructions. Direct injection: user directly inserts adversarial instructions. Indirect injection: adversarial content embedded in data the LLM processes (email body, document, web page). Tool poisoning: malicious tool descriptions that cause the LLM to call tools with attacker-controlled parameters.",
-         [14])
-    key_term(doc, "Instruction/Data Separation", "Primary prompt injection defence: clearly delimit the boundary between instructions (trusted system prompt) and data (untrusted user-provided content). The LLM must be instructed to never treat content in the data section as instructions.", 14)
-
-    h2(doc, "12.4  AI-Assisted Attacks")
-    cite(doc,
-         "AI enables three identity-specific attack categories at higher velocity and lower skill threshold: (1) AI-generated phishing — personalised lures from LinkedIn/social data, targeting specific MFA fatigue patterns. (2) Deepfake audio/video — impersonating executives for social engineering of IT helpdesk. (3) AI-automated SoD gaming — systematically requesting conflicting entitlements with calculated intervals to evade threshold detection.",
-         [14, 12])
-
-    h2(doc, "12.5  Defensive AI in IAM")
-    cite(doc,
-         "AI provides three major defensive capabilities for IAM: (1) AI-assisted access reviews — LLM analyses user profile, peer group comparison, usage data, and SoD conflicts to recommend APPROVE/REVOKE/ESCALATE with reasoning. Reduces reviewer fatigue; improves decision quality. (2) Anomaly detection — ML models detect behavioural anomalies in authentication patterns that rule-based systems miss. (3) Natural language IGA policies — allows business stakeholders to author access policies in plain English, translated to enforcement logic by LLM.",
-         [7])
-
-    h2(doc, "12.6  NIST AI RMF Applied to Identity")
-    cite(doc,
-         "NIST AI RMF 1.0 [AI 100-1] provides four functions for managing AI risk: GOVERN (policies for AI development and deployment), MAP (identify AI risks relevant to the system), MEASURE (quantify risk — false negative rate, false positive rate, bias metrics), MANAGE (implement controls to mitigate identified risks). For AI access review: MEASURE specifically requires tracking false negative rate (AI approves; human revokes) with alert threshold ≤ 5%.",
-         [7])
-
-    self_check(doc, [
-        "Why must RAG document filtering be applied server-side (at the search engine) rather than in application code?",
-        "What is the difference between direct and indirect prompt injection? Give an example of each.",
-        "What is an agent delegation token, and what claims must it contain?",
-        "Define false negative rate in the context of AI access review. Why is a 5% FN threshold used?",
-        "How does AI-automated SoD gaming evade traditional detection, and what signal reveals it?"
-    ])
-    interview_box(doc, [
-        "An AI agent has write access to your email system. What controls would you put in place to prevent prompt injection from causing it to send unauthorised emails?",
-        "How would you apply the NIST AI RMF to an AI-assisted access certification programme?",
-        "What is the LLM access control stack? Name all five layers and what each enforces.",
-        "If your AI access review system has a 12% false negative rate, what does that mean and what do you do?"
-    ])
-    doc.add_page_break()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COVER PAGE AND TOC
-# ─────────────────────────────────────────────────────────────────────────────
-
-def make_cover(doc):
+# ─────────────────────────────────────────────
+# COVER PAGE
+# ─────────────────────────────────────────────
+def build_cover(doc):
     doc.add_paragraph()
     doc.add_paragraph()
     doc.add_paragraph()
+    t = doc.add_paragraph()
+    t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = t.add_run("ENTERPRISE IDENTITY AND ACCESS MANAGEMENT")
+    set_font(r, size=20, bold=True, color=(0, 70, 127))
 
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    rt = title.add_run("Enterprise IAM Architecture")
-    rt.font.name  = FONT_NAME
-    rt.font.size  = Pt(28)
-    rt.font.bold  = True
-    rt.font.color.rgb = CLR_DARK_BLUE
+    t2 = doc.add_paragraph()
+    t2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r2 = t2.add_run("A Practitioner's Reference Textbook")
+    set_font(r2, size=14, italic=True, color=(54, 96, 146))
 
+    doc.add_paragraph()
     sub = doc.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    rs = sub.add_run("A Complete Practitioner's Textbook")
-    rs.font.name  = FONT_NAME
-    rs.font.size  = Pt(16)
-    rs.font.color.rgb = CLR_MID_BLUE
+    rs = sub.add_run(
+        "From Active Directory Foundations to AI-Driven Security Operations\n"
+        "Including Complete Script Library, Lab Procedures, and Architecture Decision Records"
+    )
+    set_font(rs, size=11, color=(80, 80, 80))
 
     doc.add_paragraph()
     doc.add_paragraph()
+    auth = doc.add_paragraph()
+    auth.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    ra = auth.add_run("Cybersec-by-Laurel  |  Enterprise IAM Portfolio Series")
+    set_font(ra, size=10, bold=True)
 
-    desc = doc.add_paragraph()
-    desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    chapters = [
-        "Directory Services  ·  PKI  ·  Federation Protocols",
-        "PAM  ·  Zero Trust  ·  IGA  ·  Microsoft Entra ID",
-        "Auth0 CIAM  ·  Defender XDR  ·  CAD Capstone  ·  AI Identity Security"
-    ]
-    for line in chapters:
-        rd = desc.add_run(line + "\n")
-        rd.font.name  = FONT_NAME
-        rd.font.size  = Pt(11)
-        rd.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+    ver = doc.add_paragraph()
+    ver.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    rv = ver.add_run("Edition 1.0  |  2026")
+    set_font(rv, size=10, color=(100, 100, 100))
+    add_page_break(doc)
 
-    doc.add_paragraph()
-    doc.add_paragraph()
 
-    meta = doc.add_paragraph()
-    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    for line in [
-        "12 Chapters  ·  48 Hands-On Labs  ·  100 Interview Questions",
-        "HIPAA  ·  HITRUST  ·  SOX  ·  PCI DSS  ·  NIST AI RMF",
-        "",
-        "Portfolio Edition — Cybersec by Laurel"
+# ─────────────────────────────────────────────
+# PREFACE
+# ─────────────────────────────────────────────
+def build_preface(doc):
+    add_h1(doc, "Preface")
+    add_body(doc,
+        "This textbook grew out of a practical need: enterprise IAM practitioners lack a single "
+        "reference that spans the full stack -- from on-premises Active Directory forest design to "
+        "AI-assisted access reviews. Most resources cover one layer in depth while ignoring the "
+        "integration seams where real-world incidents occur. This work aims to fill that gap.")
+    add_body(doc,
+        "Vertex Health Systems -- an 85,000-employee, 28-hospital integrated health network -- "
+        "serves as the running case study. Every architectural decision, every script, and every "
+        "lab exercise is grounded in scenarios that practitioners at organisations of this scale "
+        "encounter regularly.")
+    add_body(doc,
+        "Each chapter follows a deliberate structure: analogy first (to anchor the concept), "
+        "theory second, implementation third, and attack-surface analysis fourth. Scripts are "
+        "presented in full -- not as excerpts -- because understanding the complete implementation "
+        "is the only way to reason about its security properties.")
+    add_body(doc,
+        "The 48 lab exercises are designed for a Windows Server 2022 lab environment with "
+        "Microsoft Entra ID P2 licensing. Most PowerShell scripts run read-only by default; "
+        "destructive operations require explicit parameter flags. Python scripts require "
+        "Python 3.11+ and the anthropic SDK for Chapter 12 AI exercises.")
+    add_body(doc,
+        "Inline citations appear as blue bracketed numbers referencing the full bibliography "
+        "at the end of the document. Architecture Decision Records (ADRs) document the reasoning "
+        "behind major technology choices so that future teams can revisit them with full context.")
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 1
+# ─────────────────────────────────────────────
+def chapter_01(doc):
+    add_h1(doc, "Chapter 1 -- Identity Foundations and the IAM Discipline")
+
+    analogy_box(doc,
+        "The Hotel Key Card",
+        "Authentication is proving you are a registered guest (identity). Authorisation is the "
+        "set of floors and rooms your key card unlocks (entitlements). The front-desk system that "
+        "records every door touch is auditing. IAM is the design of the entire key-card ecosystem: "
+        "who issues cards, how long they last, how lost cards are revoked, and how the audit log "
+        "is reviewed.")
+
+    add_h2(doc, "1.1 What is IAM?")
+    add_body(doc,
+        "Identity and Access Management (IAM) is the discipline of ensuring that the right "
+        "principals have the right access to the right resources at the right time -- and that "
+        "every access event is logged for subsequent review.", [7])
+    add_body(doc,
+        "IAM spans four functional domains: Authentication (AuthN) -- verifying who you are; "
+        "Authorisation (AuthZ) -- determining what you may do; Administration -- provisioning, "
+        "modifying, and deprovisioning identities and entitlements; and Auditing -- recording "
+        "and reviewing all identity-related events.")
+
+    add_h2(doc, "1.2 The IAM Stack")
+    for item in [
+        "Directory Services -- Active Directory, Entra ID, LDAP",
+        "PKI / Credential Infrastructure -- certificates, smart cards, FIDO2",
+        "Privileged Access Management (PAM) -- just-in-time elevation, session recording",
+        "Zero Trust Network Access -- conditional access, continuous evaluation",
+        "Identity Governance and Administration (IGA) -- joiner/mover/leaver, access reviews",
+        "Federation and CIAM -- SAML, OIDC, social login, Auth0",
+        "Threat Detection -- SIEM, SOAR, KQL analytics, AI-assisted review",
     ]:
-        rm = meta.add_run(line + "\n")
-        rm.font.name = FONT_NAME
-        rm.font.size = Pt(10)
-        rm.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
+        add_bullet(doc, item)
 
-    doc.add_page_break()
+    add_h2(doc, "1.3 Compliance Drivers")
+    add_body(doc,
+        "IAM controls satisfy the access-control requirements of every major compliance "
+        "framework: SOC 2 CC6.x, HIPAA Section 164.312(a), PCI DSS Requirement 7-8, NIST SP 800-53 "
+        "AC family, and ISO 27001 Annex A.9. Understanding which IAM control satisfies which "
+        "requirement prevents both over-engineering and gaps.", [7])
+
+    add_h2(doc, "1.4 The Vertex Health Systems Case Study")
+    add_body(doc,
+        "Vertex Health Systems operates 28 hospitals across four US states with 85,000 employees, "
+        "12,000 contractor identities, and 4.2 million patient portal accounts. The organisation "
+        "runs a legacy on-premises Active Directory forest (vertexhealth.local) with 6 child "
+        "domains inherited from acquisition activity. The IAM programme documented in this "
+        "textbook consolidates this estate into a modern hybrid identity architecture.")
+    add_body(doc,
+        "Business requirements driving the programme: (1) eliminate standing privileged access "
+        "by 2026; (2) achieve phishing-resistant MFA for all clinical staff; (3) reduce "
+        "access-review cycle time from 90 days to 14 days; (4) pass HIPAA security-rule audit "
+        "with zero access-control findings.")
+
+    add_h2(doc, "1.5 How to Use This Textbook")
+    add_body(doc,
+        "Chapters 2-4 address the on-premises identity layer: Active Directory, PKI, and "
+        "authentication protocols. Chapters 5-6 cover privileged access and Zero Trust. "
+        "Chapters 7-9 address governance, Entra ID, and customer identity. Chapter 10 covers "
+        "threat detection. Chapter 11 is the CAD capstone design. Chapter 12 introduces "
+        "AI-assisted IAM and the emerging threat landscape of AI-enabled attacks.")
+    add_page_break(doc)
 
 
-def make_toc_page(doc):
-    h1(doc, "Table of Contents")
-    body(doc, "Update this table of contents in Microsoft Word by pressing Ctrl+A then F9, or right-clicking the field and selecting 'Update Field'.")
-    doc.add_paragraph()
-    add_toc_field(doc)
-    doc.add_page_break()
+# ─────────────────────────────────────────────
+# CHAPTER 2
+# ─────────────────────────────────────────────
+def chapter_02(doc):
+    add_h1(doc, "Chapter 2 -- Active Directory and Directory Services")
+
+    analogy_box(doc,
+        "The Library Card Catalogue",
+        "Active Directory is a library where every book (resource) has a catalogue card (object "
+        "attribute), every borrower (user) has a library card (account), and the librarian "
+        "(domain controller) maintains the authoritative index. FSMO roles are specialist "
+        "librarians: one controls new card issuance (RID Master), one ensures the index is "
+        "never corrupted by simultaneous edits (PDC Emulator), and one manages the master "
+        "catalogue across branches (Schema Master).")
+
+    add_h2(doc, "2.1 Active Directory Architecture")
+    add_body(doc,
+        "Active Directory Domain Services (AD DS) is a hierarchical, distributed database "
+        "storing identity objects -- users, computers, groups, and service accounts -- and "
+        "their attributes. It is organised into forests (security boundaries), domains "
+        "(replication and policy units), and Organisational Units (OU) for delegation.", [1])
+    add_body(doc,
+        "A forest is the outermost security boundary. All domains within a forest share "
+        "a common schema and global catalogue. Trust relationships allow authentication "
+        "across domain boundaries; SID filtering controls which security identifiers are "
+        "honoured across those trusts.", [1])
+
+    add_h2(doc, "2.2 FSMO Roles")
+    add_body(doc,
+        "Flexible Single Master Operations (FSMO) roles prevent write conflicts in a "
+        "multi-master replication environment. Five roles exist: Schema Master and Domain "
+        "Naming Master are forest-wide (one each); PDC Emulator, RID Master, and "
+        "Infrastructure Master are per-domain.", [1, 2])
+    for role, desc in [
+        ("Schema Master", "Controls schema modifications. One per forest."),
+        ("Domain Naming Master", "Authorises adding/removing domains. One per forest."),
+        ("PDC Emulator", "Time source, password lockout authority, legacy authentication fallback."),
+        ("RID Master", "Allocates RID pools to DCs for SID construction."),
+        ("Infrastructure Master", "Updates cross-domain group membership references."),
+    ]:
+        add_bullet(doc, f"{role}: {desc}")
+
+    add_h2(doc, "2.3 Kerberos Authentication")
+    add_body(doc,
+        "Kerberos v5 is the default authentication protocol in Active Directory environments. "
+        "The Key Distribution Centre (KDC), running on every domain controller, issues "
+        "Ticket Granting Tickets (TGTs) on initial authentication and Service Tickets on "
+        "resource access requests.", [3])
+    analogy_box(doc,
+        "The Theme-Park Wristband",
+        "Your initial login produces a TGT -- like the wristband you receive at the theme-park "
+        "entrance. When you want to ride a specific attraction (access a resource), you show "
+        "your wristband to get a ride ticket (Service Ticket). The ride operator never needs "
+        "to check your ID again -- only your ride ticket.")
+
+    add_h2(doc, "2.4 Attack Surface: Kerberos and Delegation")
+    add_body(doc,
+        "Three Kerberos attack classes dominate enterprise incident reports. Kerberoasting "
+        "extracts service tickets for service accounts (SPNs) and cracks them offline -- "
+        "effective against weak passwords. AS-REP Roasting targets accounts with "
+        "pre-authentication disabled. Unconstrained delegation allows any service to "
+        "impersonate any user to any resource -- a critical misconfiguration.", [4])
+
+    add_h2(doc, "2.5 Group Policy and OU Design")
+    add_body(doc,
+        "Group Policy Objects (GPOs) apply security configuration -- password policy, "
+        "software restriction, audit settings -- to OUs. GPO inheritance can be blocked "
+        "or enforced, creating audit complexity. Unlinked GPOs accumulate over time and "
+        "represent dead configuration that complicates troubleshooting.", [1])
+
+    add_h2(doc, "2.6 Script Library -- Chapter 2")
+    add_body(doc,
+        "The following nine scripts implement the Active Directory audit and hardening "
+        "procedures described in this chapter. Each script is designed to run read-only "
+        "by default; modification operations require explicit parameters.")
+
+    scripts_02 = [
+        ("scripts/chapter-02-directory/Get-FSMORoleHolders.ps1",
+         "Script 2-1: FSMO Role Holder Audit",
+         "Enumerates all five FSMO role holders, checks co-location with Global Catalogue, "
+         "and exports a CSV for change-management records.", [1, 2]),
+        ("scripts/chapter-02-directory/Find-DangerousAccountFlags.ps1",
+         "Script 2-2: Dangerous UAC Flag Detection",
+         "Scans all user accounts for high-risk User Account Control bitmask flags including "
+         "unconstrained delegation (TRUSTED_FOR_DELEGATION), password not required "
+         "(PASSWD_NOTREQD), and DES-only encryption (USE_DES_KEY_ONLY).", [1, 4]),
+        ("scripts/chapter-02-directory/Get-KerberosAttackSurface.ps1",
+         "Script 2-3: Kerberos Attack Surface Enumeration",
+         "Identifies Kerberoastable accounts (SPNs on user objects), AS-REP Roastable "
+         "accounts, unconstrained delegation targets, and krbtgt password age.", [3, 4]),
+        ("scripts/chapter-02-directory/Measure-GroupNestingDepth.ps1",
+         "Script 2-4: Group Nesting Depth Analysis",
+         "Recursively measures group nesting depth with cycle detection. Deeply nested "
+         "groups (>4 levels) cause authentication token bloat and authorisation failures.", [1]),
+        ("scripts/chapter-02-directory/Find-EmptyAndStaleGroups.ps1",
+         "Script 2-5: Empty and Stale Group Detection",
+         "Identifies empty groups and groups unchanged for more than 365 days -- primary "
+         "candidates for cleanup in IGA remediation campaigns.", [1]),
+        ("scripts/chapter-02-directory/Get-GPOCoverageAudit.ps1",
+         "Script 2-6: GPO Coverage Audit",
+         "Reports unlinked GPOs and OUs with Block Inheritance set. Both conditions "
+         "indicate configuration drift requiring review.", [1]),
+        ("scripts/chapter-02-directory/Get-NTLMUsageAudit.ps1",
+         "Script 2-7: NTLM Usage Audit",
+         "Checks LmCompatibilityLevel registry value and queries Event 8004 volume to "
+         "identify NTLM usage that should be migrated to Kerberos.", [1, 3]),
+        ("scripts/chapter-02-directory/Get-TrustSIDFilteringAudit.ps1",
+         "Script 2-8: Trust SID Filtering Audit",
+         "Enumerates all domain and forest trusts, verifies SID filtering status, "
+         "and flags trusts with filtering disabled (privilege escalation risk).", [1, 4]),
+        ("scripts/chapter-02-directory/Get-ADHealthDashboard.ps1",
+         "Script 2-9: Active Directory Health Dashboard",
+         "Comprehensive health check covering replication status, privileged group membership, "
+         "FSMO holders, krbtgt password age, and DC operating system versions.", [1, 2, 3]),
+    ]
+
+    for path, title, desc, refs in scripts_02:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "2.7 Lab Exercises -- Chapter 2")
+    labs_02 = [
+        ("Lab 2-A", "FSMO Role Transfer",
+         "1. Open Active Directory Users and Computers as Domain Admin.\n"
+         "2. Right-click domain root > Operations Masters.\n"
+         "3. Document current RID Master holder.\n"
+         "4. Run Get-FSMORoleHolders.ps1 and verify output matches GUI.\n"
+         "5. Using Active Directory Module: Move-ADDirectoryServerOperationMasterRole "
+         "-Identity DC02 -OperationMasterRole RIDMaster.\n"
+         "6. Re-run script to confirm transfer.\n"
+         "7. Transfer back to original holder."),
+        ("Lab 2-B", "Kerberoast Simulation",
+         "1. Create a service account: New-ADUser -Name svc_sql -Enabled $true.\n"
+         "2. Set an SPN: setspn -A MSSQLSvc/sql01.corp.local:1433 svc_sql.\n"
+         "3. Request a service ticket via .NET IdentityModel.\n"
+         "4. Run Get-KerberosAttackSurface.ps1 -- verify svc_sql appears.\n"
+         "5. Remediation: set a 127-character random password on svc_sql; "
+         "consider gMSA replacement."),
+        ("Lab 2-C", "GPO Inheritance Audit",
+         "1. Run Get-GPOCoverageAudit.ps1.\n"
+         "2. Identify any OUs with Block Inheritance.\n"
+         "3. Review which GPOs are unlinked.\n"
+         "4. For each unlinked GPO, determine if it can be deleted or should be linked.\n"
+         "5. Document findings in the Vertex Health change log."),
+        ("Lab 2-D", "NTLM Deprecation Baseline",
+         "1. Run Get-NTLMUsageAudit.ps1 on each domain controller.\n"
+         "2. Review Event 8004 count (NTLM pass-through authentications).\n"
+         "3. Identify top NTLM-using workstations from Security log.\n"
+         "4. Map NTLM usage to application owners.\n"
+         "5. Create a migration plan to Kerberos or modern auth for each application."),
+    ]
+    for lab_id, lab_title, procedure in labs_02:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
 
 
-def make_preface(doc):
-    h1(doc, "Preface")
-    cite(doc,
-         "This textbook presents Enterprise Identity and Access Management (IAM) architecture from the practitioner's perspective — for engineers who need to design, build, defend, and explain IAM systems at the architect level. Every concept is introduced with a real-world analogy before the formal definition, grounding abstract security concepts in tangible experience.",
-         [1, 17])
-    body(doc, "The textbook is structured in three parts:")
-    bullet(doc, "Foundations (Chapters 1–4): Identity concepts, directory services, PKI, and federation protocols — the building blocks every IAM architect must own.")
-    bullet(doc, "Advanced Controls (Chapters 5–8): PAM, Zero Trust, IGA, and Entra ID — the operational and architectural layers that mature programmes deploy.")
-    bullet(doc, "Applied Architecture (Chapters 9–12): Auth0 CIAM, Defender XDR implementation, the Vertex Health Systems capstone, and AI identity security — synthesis and application.")
-    doc.add_paragraph()
-    body(doc, "Each chapter follows a consistent structure: Analogy → Formal Definition → Architect-Grade Detail → Worked Examples → Self-Check Questions → Interview Cheat Sheet. The 12 chapters collectively contain 48 hands-on labs designed for Microsoft 365 Developer Tenant (free) or Auth0 free tier environments.")
-    doc.add_paragraph()
-    body(doc, "Inline citations [N] reference the authoritative sources listed in the References section at the end of this document. All technical claims are grounded in NIST, IETF, OASIS, or vendor-authoritative documentation.")
-    doc.add_page_break()
+# ─────────────────────────────────────────────
+# CHAPTER 3
+# ─────────────────────────────────────────────
+def chapter_03(doc):
+    add_h1(doc, "Chapter 3 -- Public Key Infrastructure and Certificate Services")
+
+    analogy_box(doc,
+        "The Notary Public",
+        "A Certificate Authority is a trusted notary. When a notary stamps a document, "
+        "everyone who trusts that notary also trusts the document. The Root CA is the "
+        "Grand Notary whose stamp is pre-installed in every browser and operating system. "
+        "Intermediate CAs are regional offices -- they can stamp documents because the "
+        "Grand Notary has stamped their authority certificate.")
+
+    add_h2(doc, "3.1 PKI Hierarchy")
+    add_body(doc,
+        "A PKI hierarchy distributes trust. An offline Root CA issues only Intermediate CA "
+        "certificates and is kept powered-off in a physically secure location -- this protects "
+        "the root key even if online systems are compromised. Issuing CAs are online and "
+        "issue end-entity certificates (users, computers, servers).", [5, 7])
+    add_body(doc,
+        "Vertex Health PKI decision: two-tier hierarchy. One offline Root CA (kept in a "
+        "bank vault with HSM). Two online Issuing CAs for redundancy -- one per primary "
+        "data centre. Certificate lifetime: Root 20 years, Issuing CA 10 years, "
+        "end-entity 1 year (see ADR-003).")
+
+    add_h2(doc, "3.2 Active Directory Certificate Services (AD CS)")
+    add_body(doc,
+        "AD CS integrates PKI with Active Directory, enabling auto-enrolment for computers "
+        "and users. Certificate templates define what can be requested, who can request it, "
+        "and what the certificate can be used for. Misconfigured templates are the root "
+        "cause of ESC-class vulnerabilities.", [5, 6])
+
+    add_h2(doc, "3.3 ESC Vulnerabilities")
+    add_body(doc,
+        "Certified Pre-Owned (2021) documented eight classes of AD CS misconfigurations "
+        "(ESC1-ESC8) allowing privilege escalation or authentication bypass. ESC1: enrolee "
+        "can specify Subject Alternative Name (SAN) -- allows impersonating any user. "
+        "ESC2: template allows any purpose and has enrolee-supplied subject. "
+        "ESC8: NTLM relay to HTTP-exposed certificate enrolment endpoint.", [6])
+    analogy_box(doc,
+        "The Blank Cheque",
+        "ESC1 is equivalent to being handed a blank cheque and being told to fill in your "
+        "own name as the payee. The certificate template lets the requester specify whose "
+        "identity the certificate will assert -- so any user can claim to be the Domain Admin.")
+
+    add_h2(doc, "3.4 Certificate Lifecycle Management")
+    add_body(doc,
+        "Certificates expire. Auto-enrolment reduces manual renewal burden for domain-joined "
+        "systems. Non-domain-joined systems (IoT, third-party apps) require ACME protocol "
+        "or manual renewal processes. Certificate revocation via CRL and OCSP must be "
+        "accessible from all client networks -- a common gap in segmented environments.", [5])
+
+    add_h2(doc, "3.5 Script Library -- Chapter 3")
+
+    scripts_03 = [
+        ("scripts/chapter-03-pki/Find-VulnerableCertTemplates.ps1",
+         "Script 3-1: Vulnerable Certificate Template Detection (ESC1/ESC2/ESC3)",
+         "Enumerates all certificate templates in AD, checks enrollment permissions, "
+         "SAN supply flags, and EKU settings to identify ESC1/2/3-class vulnerabilities.", [5, 6]),
+        ("scripts/chapter-03-pki/Get-CAInfrastructureAudit.ps1",
+         "Script 3-2: CA Infrastructure Audit",
+         "Audits all CAs in the forest: certificate expiry, HTTP certsrv exposure, "
+         "and web enrolment endpoint availability (ESC8 precondition).", [5, 6]),
+        ("scripts/chapter-03-pki/Get-CertificateExpiryReport.ps1",
+         "Script 3-3: Certificate Expiry Monitoring",
+         "Uses certutil to enumerate issued certificates and reports those expiring "
+         "within 60 days (warning) or 30 days (critical).", [5]),
+        ("scripts/chapter-03-pki/Test-ESC8Vulnerability.ps1",
+         "Script 3-4: ESC8 Vulnerability Test",
+         "Tests whether the CA web enrolment endpoint (certsrv) is accessible over HTTP "
+         "and returns an NTLM challenge -- the two preconditions for ESC8 relay attacks.", [6]),
+    ]
+
+    for path, title, desc, refs in scripts_03:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h3(doc, "OpenSSL Reference -- PKI Operations")
+    add_body(doc,
+        "The following reference covers the 15 most common OpenSSL certificate operations "
+        "performed by IAM engineers: key generation, CSR creation, chain validation, "
+        "OCSP checking, PKCS12 bundling, CRL inspection, and TLS testing.")
+    openssl_md = read_script("scripts/chapter-03-pki/openssl-reference.md")
+    add_code_block(doc, openssl_md, "openssl-reference.md")
+
+    add_h2(doc, "3.6 Lab Exercises -- Chapter 3")
+    labs_03 = [
+        ("Lab 3-A", "ESC1 Discovery and Remediation",
+         "1. Run Find-VulnerableCertTemplates.ps1.\n"
+         "2. Review output for templates with ENROLLEE_SUPPLIES_SUBJECT flag.\n"
+         "3. For each vulnerable template: open Certificate Templates Console, "
+         "locate template, check Request Handling > Supply in the request.\n"
+         "4. Remediation: uncheck Supply in the request; require approval for Subject.\n"
+         "5. Document templates remediated in Vertex Health PKI remediation log."),
+        ("Lab 3-B", "Certificate Expiry Dashboard",
+         "1. Run Get-CertificateExpiryReport.ps1 against both Issuing CAs.\n"
+         "2. Identify certificates expiring within 30 days.\n"
+         "3. Map each certificate to its owning system and application team.\n"
+         "4. Initiate renewal requests for critical certificates.\n"
+         "5. Validate renewal via: certutil -verify <cert.cer>."),
+        ("Lab 3-C", "ESC8 Remediation",
+         "1. Run Test-ESC8Vulnerability.ps1.\n"
+         "2. If certsrv responds on HTTP: add HTTPS binding in IIS Manager, "
+         "redirect HTTP to HTTPS.\n"
+         "3. Disable NTLM on certsrv: require extended protection for authentication.\n"
+         "4. Re-run Test-ESC8Vulnerability.ps1 to confirm remediation.\n"
+         "5. Consider disabling web enrolment entirely if ADCS auto-enrolment is sufficient."),
+    ]
+    for lab_id, lab_title, procedure in labs_03:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# CHAPTER 4
+# ─────────────────────────────────────────────
+def chapter_04(doc):
+    add_h1(doc, "Chapter 4 -- Authentication Protocols: SAML, OIDC, and Federation")
+
+    analogy_box(doc,
+        "The Diplomatic Passport",
+        "Federation is like international diplomatic recognition. Your home country (Identity "
+        "Provider) issues your passport (SAML assertion or ID token). When you arrive at a "
+        "foreign country (Service Provider), they trust your passport because your country and "
+        "theirs have a bilateral agreement (federation trust). You never show your password -- "
+        "only your passport.")
+
+    add_h2(doc, "4.1 SAML 2.0")
+    add_body(doc,
+        "Security Assertion Markup Language (SAML) 2.0 is an XML-based federation protocol "
+        "widely used in enterprise SSO. The Identity Provider (IdP) authenticates the user "
+        "and issues a signed XML assertion. The Service Provider (SP) validates the "
+        "assertion signature using the IdP's public certificate.")
+    add_body(doc,
+        "SAML flows: SP-initiated (user starts at SP, gets redirected to IdP) and "
+        "IdP-initiated (user starts at IdP portal). SP-initiated is preferred -- "
+        "IdP-initiated assertions lack a nonce and are vulnerable to replay attacks.")
+
+    add_h2(doc, "4.2 OpenID Connect and OAuth 2.0")
+    add_body(doc,
+        "OIDC layers an identity layer on top of OAuth 2.0. The Authorization Server issues "
+        "an ID Token (JWT) asserting who the user is, and an Access Token authorising API "
+        "calls. OAuth 2.0 alone handles authorisation; OIDC adds authentication semantics.", [19])
+    add_body(doc,
+        "Token types: ID Token (who you are, for the client), Access Token (what you can do, "
+        "for the API), Refresh Token (obtain new access tokens without re-authentication). "
+        "Always validate: issuer, audience, expiry, and signature.")
+
+    add_h2(doc, "4.3 Microsoft AD FS vs Pass-Through Sync")
+    add_body(doc,
+        "AD FS federates on-premises identity to cloud services by issuing SAML/OIDC tokens "
+        "from on-premises infrastructure. Password Hash Sync (PHS) replicates a hash of the "
+        "password hash to Entra ID, enabling cloud authentication without on-premises "
+        "dependency. PHS is preferred for resilience -- if on-premises fails, authentication "
+        "continues.", [7])
+    add_body(doc,
+        "Vertex Health ADR-002 selected PHS over AD FS to eliminate the AD FS infrastructure "
+        "dependency. Seamless SSO provides transparent Kerberos-based SSO from domain-joined "
+        "machines without routing authentication on-premises.")
+
+    add_h2(doc, "4.4 Phishing-Resistant Authentication")
+    add_body(doc,
+        "Password + SMS OTP is vulnerable to SIM-swap and real-time phishing proxies. "
+        "Phishing-resistant authentication requires a cryptographic binding between the "
+        "authentication ceremony and the legitimate origin: FIDO2/WebAuthn passkeys, "
+        "certificate-based authentication (CBA), or Windows Hello for Business.", [7])
+
+    add_h2(doc, "4.5 Lab Exercises -- Chapter 4")
+    for lab_id, lab_title, procedure in [
+        ("Lab 4-A", "SAML Assertion Inspection",
+         "1. Configure a SAML application in Entra ID.\n"
+         "2. Use SAML tracer browser extension to capture the assertion.\n"
+         "3. Base64-decode and review: Issuer, Subject, Conditions, AttributeStatement, Signature.\n"
+         "4. Verify the NotBefore and NotOnOrAfter timestamps.\n"
+         "5. Confirm the certificate thumbprint matches the IdP signing certificate."),
+        ("Lab 4-B", "OIDC Token Inspection",
+         "1. Configure an OIDC app registration in Entra ID.\n"
+         "2. Obtain an ID Token using the authorization code flow.\n"
+         "3. Decode the JWT at jwt.ms.\n"
+         "4. Verify: iss, aud, exp, iat, sub, and custom claims.\n"
+         "5. Review the token lifetime configuration in the app registration."),
+        ("Lab 4-C", "FIDO2 Registration",
+         "1. In Entra ID > Authentication Methods, enable FIDO2 security keys.\n"
+         "2. Register a FIDO2 key for a test user.\n"
+         "3. Sign in using the FIDO2 key.\n"
+         "4. Review the sign-in log -- confirm authenticationMethodsUsed = FIDO2.\n"
+         "5. Test: attempt to sign in from a phishing-proxy URL -- confirm the key refuses."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 5
+# ─────────────────────────────────────────────
+def chapter_05(doc):
+    add_h1(doc, "Chapter 5 -- Privileged Access Management")
+
+    analogy_box(doc,
+        "The Safety Deposit Box",
+        "Standing privileged access is like keeping the safety deposit box key on your "
+        "keyring at all times -- convenient but a constant theft target. Just-in-time "
+        "access is the bank's time-vault: you request access, a banker escorts you at the "
+        "appointed time, and the vault locks again when your session ends. The valuable "
+        "items are equally accessible but the attack window is milliseconds, not years.")
+
+    add_h2(doc, "5.1 Why Standing Privilege is Dangerous")
+    add_body(doc,
+        "Standing privileged accounts -- accounts that are permanently members of Domain "
+        "Admins, Global Admins, or equivalent -- are the primary target of every advanced "
+        "persistent threat actor. They represent persistent, always-available privilege "
+        "that can be harvested via credential theft, lateral movement, or insider abuse.", [8])
+
+    add_h2(doc, "5.2 Just-In-Time Access Models")
+    add_body(doc,
+        "JIT access grants privilege for a specific time window in response to an approved "
+        "request. Three implementation models: (1) Entra PIM -- activates role membership "
+        "for 1-8 hours with approval and MFA. (2) CyberArk -- checks out credentials from "
+        "vault and rotates after session. (3) AD JIT Groups -- time-bounded AD group "
+        "membership via scheduled task auto-revocation (Script 5-2).", [8, 9])
+
+    add_h2(doc, "5.3 PowerShell Security and Logging")
+    add_body(doc,
+        "PowerShell is the most powerful administrative tool in Windows environments and "
+        "therefore the most abused by attackers. Script Block Logging (Event 4104) records "
+        "deobfuscated script content; Module Logging (4103) records pipeline execution; "
+        "Transcription saves full session transcripts; AMSI Integration enables real-time "
+        "content inspection by antimalware.")
+
+    add_h2(doc, "5.4 LAPS and Local Administrator Management")
+    add_body(doc,
+        "Local Administrator Password Solution (LAPS) generates unique, random local "
+        "administrator passwords for each managed endpoint and stores them in AD (Legacy "
+        "LAPS) or Entra ID (Windows LAPS). This prevents lateral movement via shared "
+        "local admin credentials -- a technique used in over 60% of ransomware incidents.", [9])
+
+    add_h2(doc, "5.5 Break-Glass Accounts")
+    add_body(doc,
+        "Break-glass (emergency access) accounts are cloud-only Global Admin accounts "
+        "excluded from all Conditional Access policies. Requirements: FIDO2-only "
+        "authentication, no MFA method that can be lost, stored credentials in physically "
+        "secured location, sign-in alerts monitored 24/7.")
+
+    add_h2(doc, "5.6 Script Library -- Chapter 5")
+
+    scripts_05 = [
+        ("scripts/chapter-05-pam/Get-PIMAudit.ps1",
+         "Script 5-1: Entra PIM Audit",
+         "Reports permanent active role assignments (should be zero for privileged roles), "
+         "counts eligible Global Admin assignments, and reviews recent role activations.", [8]),
+        ("scripts/chapter-05-pam/New-JITGroupMembership.ps1",
+         "Script 5-2: Just-in-Time AD Group Membership",
+         "Creates a time-bounded AD group membership by adding a user and scheduling "
+         "an automatic removal task after the specified duration.", [9]),
+        ("scripts/chapter-05-pam/Set-PowerShellLogging.ps1",
+         "Script 5-3: PowerShell Logging Configuration",
+         "Enables Script Block Logging (4104), Module Logging (4103), and Transcription "
+         "via registry keys and Group Policy-compatible settings.", [8]),
+        ("scripts/chapter-05-pam/Find-SuspiciousPSCommands.ps1",
+         "Script 5-4: Suspicious PowerShell Command Detection",
+         "Queries Event 4104 for 14 attack signatures including mimikatz, AMSI bypass, "
+         "BloodHound, Invoke-Kerberoast, and credential dumping patterns.", [4, 8]),
+        ("scripts/chapter-05-pam/Get-LAPSAudit.ps1",
+         "Script 5-5: LAPS Coverage Audit",
+         "Reports computers with Legacy LAPS, Windows LAPS, and no LAPS coverage. "
+         "Also identifies computers with expired LAPS passwords.", [9]),
+        ("scripts/chapter-05-pam/Watch-BreakGlassAccounts.ps1",
+         "Script 5-6: Break-Glass Account Monitor",
+         "Validates break-glass account configuration: cloud-only check, FIDO2-only "
+         "authentication methods, CA policy exclusion, and last sign-in activity.", [8]),
+        ("scripts/chapter-05-pam/Get-KerberosAttackSurface.ps1",
+         "Script 5-7: PAM-Focused Kerberos Attack Surface",
+         "Identifies service accounts with SPNs that are also members of privileged groups "
+         "-- the highest-risk Kerberoasting targets.", [3, 4]),
+    ]
+
+    for path, title, desc, refs in scripts_05:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "5.7 Lab Exercises -- Chapter 5")
+    for lab_id, lab_title, procedure in [
+        ("Lab 5-A", "PIM Role Activation",
+         "1. In Entra ID, make a test user eligible for Security Reader role via PIM.\n"
+         "2. Sign in as the test user and activate the role.\n"
+         "3. Observe the approval workflow and MFA requirement.\n"
+         "4. Run Get-PIMAudit.ps1 -- verify no permanent active assignments.\n"
+         "5. Let activation expire and verify the role is removed."),
+        ("Lab 5-B", "JIT AD Group Membership",
+         "1. Run New-JITGroupMembership.ps1 -UserSamAccountName testuser "
+         "-GroupName 'Server-Admins' -DurationMinutes 30.\n"
+         "2. Verify user is added to group: Get-ADGroupMember 'Server-Admins'.\n"
+         "3. Verify scheduled task was created: Get-ScheduledTask -TaskName 'JIT-Remove-*'.\n"
+         "4. Wait for task to run, verify user is removed.\n"
+         "5. Review the JIT audit log entry."),
+        ("Lab 5-C", "PowerShell Logging Verification",
+         "1. Run Set-PowerShellLogging.ps1.\n"
+         "2. Open a new PowerShell session.\n"
+         "3. Execute: Get-ADUser -Filter * (a normal command).\n"
+         "4. Open Event Viewer > Applications and Services Logs > PowerShell.\n"
+         "5. Verify Event 4104 contains the deobfuscated script block.\n"
+         "6. Run Find-SuspiciousPSCommands.ps1 to confirm detection pipeline works."),
+        ("Lab 5-D", "Break-Glass Account Configuration",
+         "1. Create a cloud-only account: breakglass@vertexhealth.onmicrosoft.com.\n"
+         "2. Assign Global Administrator role permanently.\n"
+         "3. Register a FIDO2 key -- the ONLY authentication method.\n"
+         "4. Verify account is excluded from all Conditional Access policies.\n"
+         "5. Run Watch-BreakGlassAccounts.ps1 to validate configuration.\n"
+         "6. Store the recovery kit in the physical safe."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 6
+# ─────────────────────────────────────────────
+def chapter_06(doc):
+    add_h1(doc, "Chapter 6 -- Zero Trust Architecture and Conditional Access")
+
+    analogy_box(doc,
+        "The Airport Security Checkpoint",
+        "Traditional perimeter security is like a castle with a moat: get across the "
+        "drawbridge (VPN) and you have free run of the interior. Zero Trust is like a "
+        "modern airport: you pass through security to enter, but you also show your "
+        "boarding pass (authorisation) at every gate. Each gate makes an independent "
+        "decision -- it does not trust you just because you got past the entrance.")
+
+    add_h2(doc, "6.1 Zero Trust Principles")
+    add_body(doc,
+        "Zero Trust, formalised by NIST SP 800-207, rests on three principles: "
+        "(1) Never trust, always verify -- no implicit trust based on network location. "
+        "(2) Assume breach -- design as if attackers are already inside. "
+        "(3) Least privilege -- grant minimum access required for each operation.", [11])
+
+    add_h2(doc, "6.2 Conditional Access Policy Design")
+    add_body(doc,
+        "Conditional Access (CA) is the Zero Trust policy engine in Entra ID. Policies "
+        "evaluate signals -- user identity, device compliance, location, application, "
+        "session risk -- and enforce controls: MFA, compliant device, approved app, "
+        "or session restrictions.", [12])
+
+    add_h2(doc, "6.3 Continuous Access Evaluation (CAE)")
+    add_body(doc,
+        "Traditional access tokens live for 1 hour regardless of risk changes. CAE "
+        "enables near-real-time token revocation when the IdP sends a revocation event -- "
+        "CAE-capable applications re-evaluate within seconds rather than waiting for "
+        "token expiry. This closes the window between compromise detection and "
+        "access termination.", [12])
+
+    add_h2(doc, "6.4 Script Library -- Chapter 6")
+
+    scripts_06 = [
+        ("scripts/chapter-06-zerotrust/Get-CAPolicyGapAnalysis.ps1",
+         "Script 6-1: Conditional Access Policy Gap Analysis",
+         "Evaluates existing CA policies against the Vertex Health baseline tiers: "
+         "Tier B (block legacy auth), Tier I (require MFA), Tier P (privileged role "
+         "protection). Reports gaps for each tier.", [11, 12]),
+        ("scripts/chapter-06-zerotrust/Measure-ZeroTrustMaturity.ps1",
+         "Script 6-2: Zero Trust Maturity Assessment",
+         "Interactive CISA 5-pillar Zero Trust Maturity Model self-assessment. "
+         "Scores each pillar on a 1-4 scale and exports results to JSON.", [11, 13]),
+        ("scripts/chapter-06-zerotrust/Test-CAEAndRevocation.ps1",
+         "Script 6-3: CAE and Token Revocation Test",
+         "Analyses sign-in logs for modern vs legacy authentication distribution "
+         "and tests token revocation latency via Entra ID revocation APIs.", [12]),
+    ]
+
+    for path, title, desc, refs in scripts_06:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "6.5 Lab Exercises -- Chapter 6")
+    for lab_id, lab_title, procedure in [
+        ("Lab 6-A", "CA Policy Gap Analysis",
+         "1. Run Get-CAPolicyGapAnalysis.ps1.\n"
+         "2. Review the gap report for each tier (B/I/P).\n"
+         "3. For each gap: create the missing CA policy in report-only mode first.\n"
+         "4. Monitor for 7 days. Review impact analysis, then enable."),
+        ("Lab 6-B", "Zero Trust Maturity Assessment",
+         "1. Run Measure-ZeroTrustMaturity.ps1.\n"
+         "2. Answer each pillar question honestly.\n"
+         "3. Review the JSON output.\n"
+         "4. Identify the two lowest-scoring pillars.\n"
+         "5. Create a 90-day improvement plan for each pillar."),
+        ("Lab 6-C", "Legacy Authentication Block",
+         "1. In Entra ID Sign-in Logs, filter by Client App = Other clients.\n"
+         "2. Identify users still using legacy auth protocols.\n"
+         "3. Contact application owners for each identified application.\n"
+         "4. Create CA policy blocking legacy auth in report-only mode.\n"
+         "5. After 30-day monitoring, enable the block policy."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 7
+# ─────────────────────────────────────────────
+def chapter_07(doc):
+    add_h1(doc, "Chapter 7 -- Identity Governance and Administration")
+
+    analogy_box(doc,
+        "The Employee Badge Audit",
+        "IGA is the quarterly review where HR walks through the building and asks: "
+        "does this person still work here? Do they still need access to this floor? "
+        "Without IGA, access accumulates like clutter -- every project, every role change, "
+        "every temporary assignment leaves a permanent access trace. IGA is the "
+        "institutional memory that asks: why does this person still have this?")
+
+    add_h2(doc, "7.1 The Joiner-Mover-Leaver Lifecycle")
+    add_body(doc,
+        "Every identity follows a lifecycle: Joiner (new employee -- provision access), "
+        "Mover (role change -- modify access to match new role, remove access from old role), "
+        "and Leaver (termination -- revoke all access within SLA). Access that accumulates "
+        "from the Mover phase without removal is called access creep -- the primary "
+        "driver of Segregation of Duties violations.")
+
+    add_h2(doc, "7.2 Segregation of Duties")
+    add_body(doc,
+        "SoD prevents a single individual from having conflicting entitlements -- "
+        "specifically, the ability to initiate and approve the same transaction. "
+        "In financial systems, AP-Create-Vendor and AP-Approve-Payment conflict: "
+        "one person holding both can create a fraudulent vendor and approve payment to it.", [14, 15])
+
+    add_h2(doc, "7.3 Access Certifications")
+    add_body(doc,
+        "Access certification (access review) is the periodic process of having managers "
+        "or application owners certify that entitlements are still appropriate. "
+        "Certification frequency should match entitlement risk: quarterly for privileged "
+        "access, annually for standard access. AI-assisted review (Chapter 12) accelerates "
+        "this process by pre-populating recommendations.")
+
+    add_h2(doc, "7.4 SCIM Provisioning")
+    add_body(doc,
+        "System for Cross-domain Identity Management (SCIM) 2.0 is the standard protocol "
+        "for automated user provisioning between identity providers and applications. "
+        "SCIM enables real-time provisioning on joiner events and deprovisioning on "
+        "leaver events without manual intervention.", [16])
+    analogy_box(doc,
+        "The Automated Passport System",
+        "SCIM is like an automated immigration system: when HR records a new hire, the "
+        "system automatically notifies every downstream application -- without requiring a "
+        "human to manually update each one. The leaver process triggers automatic "
+        "deactivation everywhere simultaneously.")
+
+    add_h2(doc, "7.5 Script Library -- Chapter 7")
+
+    scripts_07 = [
+        ("scripts/chapter-07-iga/Find-SoDViolations.ps1",
+         "Script 7-1: Segregation of Duties Violation Detection",
+         "CSV-driven SoD conflict detection. Reads a conflict matrix and entitlement "
+         "assignments, identifies users with conflicting entitlement pairs, and calculates "
+         "violation duration.", [14, 15]),
+        ("scripts/chapter-07-iga/Invoke-LeaverProcessing.ps1",
+         "Script 7-2: Automated Leaver Processing",
+         "Implements the leaver workflow: WHO/WHAT/WHEN/WHY audit logging, 4-hour "
+         "SLA enforcement, Entra ID session revocation, and account disable operations.", [14]),
+        ("scripts/chapter-07-iga/Test-SCIMEndpoint.ps1",
+         "Script 7-3: SCIM Endpoint Lifecycle Test",
+         "Full SCIM 2.0 lifecycle test: Create user, Read user, Patch (update) user, "
+         "Deactivate user (PATCH active=false), Delete user. Validates endpoint compliance.", [16]),
+    ]
+
+    for path, title, desc, refs in scripts_07:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "7.6 Lab Exercises -- Chapter 7")
+    for lab_id, lab_title, procedure in [
+        ("Lab 7-A", "SoD Violation Detection",
+         "1. Create a SoD conflict matrix CSV (Zone1, Zone2, Severity).\n"
+         "2. Create an entitlement assignment CSV (UserID, Entitlement, Zone).\n"
+         "3. Run Find-SoDViolations.ps1 with your test data.\n"
+         "4. Review output for HIGH and CRITICAL violations.\n"
+         "5. For each violation: determine which entitlement to revoke based on role.\n"
+         "6. Document remediation plan in the Vertex Health IGA remediation tracker."),
+        ("Lab 7-B", "Leaver Processing Simulation",
+         "1. Create a test user in AD and assign to several security groups.\n"
+         "2. Run Invoke-LeaverProcessing.ps1 -UserSamAccountName testleaver.\n"
+         "3. Verify: account disabled, group memberships removed, session revoked.\n"
+         "4. Review the WHO/WHAT/WHEN/WHY audit log entry.\n"
+         "5. Verify completion within the 4-hour SLA."),
+        ("Lab 7-C", "SCIM Provisioning Test",
+         "1. Configure a SCIM endpoint (use Postman or a test SCIM server).\n"
+         "2. Run Test-SCIMEndpoint.ps1 against your endpoint.\n"
+         "3. Verify all lifecycle operations: Create, Read, Patch, Deactivate, Delete.\n"
+         "4. Review the SCIM server logs to confirm proper request format.\n"
+         "5. Test error handling: attempt to create a duplicate user."),
+        ("Lab 7-D", "Access Certification Campaign",
+         "1. In Entra ID Identity Governance, create an Access Review for the "
+         "Clinical-Apps-Users group.\n"
+         "2. Set reviewer = Group Owner, duration = 14 days, frequency = Quarterly.\n"
+         "3. As the group owner, review each member and make approve/deny decisions.\n"
+         "4. Observe auto-apply: denied members are removed after campaign closes.\n"
+         "5. Export results and calculate reviewer completion rate."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 8
+# ─────────────────────────────────────────────
+def chapter_08(doc):
+    add_h1(doc, "Chapter 8 -- Microsoft Entra ID: Cloud Identity Platform")
+
+    analogy_box(doc,
+        "The Cloud Concierge",
+        "Entra ID is the hotel concierge who knows every guest (identity), every room "
+        "they are allowed to enter (authorisation), and every service they have used (audit). "
+        "Unlike Active Directory (which is the on-premises building security desk), "
+        "the Entra concierge operates across all cloud properties simultaneously -- "
+        "regardless of whether the guest is in the building or calling from abroad.")
+
+    add_h2(doc, "8.1 Entra ID vs Active Directory")
+    add_body(doc,
+        "Entra ID is not Active Directory in the cloud. AD is a Kerberos/LDAP directory "
+        "designed for domain-joined devices on a LAN. Entra ID is a modern identity "
+        "platform using OIDC/SAML/OAuth 2.0, designed for cloud applications and "
+        "remote access. Entra Connect syncs identities from AD to Entra ID, enabling "
+        "hybrid identity.", [17])
+
+    add_h2(doc, "8.2 App Registrations and Service Principals")
+    add_body(doc,
+        "An App Registration defines an application's identity in Entra ID: credentials "
+        "(secrets/certificates), permissions, and redirect URIs. A Service Principal is "
+        "the instance of that application within a specific tenant. Application permissions "
+        "(app roles) allow background processes to act without a user context; delegated "
+        "permissions act on behalf of a signed-in user.", [17])
+
+    add_h2(doc, "8.3 Guest Identity Management")
+    add_body(doc,
+        "Entra External Collaboration (B2B) allows partner and contractor identities "
+        "from external tenants or social providers. Risks: guests with pending acceptance "
+        "for >30 days (invitation phishing window), guests with no sign-in >90 days "
+        "(stale identities), and guests without group membership (unused access).")
+
+    add_h2(doc, "8.4 Microsoft Graph API")
+    add_body(doc,
+        "Microsoft Graph is the unified API for all Microsoft cloud services. Delta queries "
+        "use a delta link to retrieve only changes since the last query -- essential for "
+        "efficient synchronisation in large tenants.", [18])
+
+    add_h2(doc, "8.5 Script Library -- Chapter 8")
+
+    scripts_08 = [
+        ("scripts/chapter-08-entra/Get-AppRegistrationSecurityAudit.ps1",
+         "Script 8-1: App Registration Security Audit",
+         "Identifies expiring client secrets (<30/60 day warning), apps without owners, "
+         "multi-tenant applications, and apps with application (non-delegated) permissions.", [17]),
+        ("scripts/chapter-08-entra/Get-StaleGuestAudit.ps1",
+         "Script 8-2: Stale Guest Identity Audit",
+         "Reports guests with pending invitation acceptance, no sign-in in >90 days, "
+         "and guests with no group membership assignments.", [17]),
+        ("scripts/chapter-08-entra/Get-GraphDeltaChanges.ps1",
+         "Script 8-3: Microsoft Graph Delta Query",
+         "Demonstrates delta link persistence for incremental identity synchronisation. "
+         "First run performs full sync; subsequent runs retrieve only changes.", [18]),
+    ]
+
+    for path, title, desc, refs in scripts_08:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "8.6 Lab Exercises -- Chapter 8")
+    for lab_id, lab_title, procedure in [
+        ("Lab 8-A", "App Registration Security Audit",
+         "1. Run Get-AppRegistrationSecurityAudit.ps1 against your tenant.\n"
+         "2. Identify applications with secrets expiring within 30 days.\n"
+         "3. Contact application owners for each expiring credential.\n"
+         "4. Rotate the secret: New-AzADAppCredential -ObjectId <appId>.\n"
+         "5. Review applications without owners -- assign owners or plan decommission."),
+        ("Lab 8-B", "Guest Access Review",
+         "1. Run Get-StaleGuestAudit.ps1.\n"
+         "2. Review guests with pending invitations >30 days.\n"
+         "3. Cancel stale invitations: Remove-MgUser -UserId <guestId>.\n"
+         "4. Review guests with no sign-in >90 days with their sponsoring manager.\n"
+         "5. Create a quarterly guest review process in Entra Identity Governance."),
+        ("Lab 8-C", "Graph Delta Synchronisation",
+         "1. Run Get-GraphDeltaChanges.ps1 -- observe full sync output.\n"
+         "2. Create a new user in Entra ID.\n"
+         "3. Re-run the script with the saved delta link -- observe incremental output.\n"
+         "4. Verify only the new user appears in the delta response.\n"
+         "5. Test with a user deletion -- verify the delta returns the deleted object."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 9
+# ─────────────────────────────────────────────
+def chapter_09(doc):
+    add_h1(doc, "Chapter 9 -- Customer Identity and Access Management with Auth0")
+
+    analogy_box(doc,
+        "The Concert Venue Ticketing System",
+        "CIAM is the public-facing ticketing system, not the employee badge system. "
+        "Millions of concert-goers (customers) need to create accounts, buy tickets, "
+        "and manage preferences -- all without IT department involvement. Auth0 handles "
+        "social login (Log in with Google), multi-factor authentication, and organisation "
+        "segregation (VIP section vs general admission).")
+
+    add_h2(doc, "9.1 CIAM vs Workforce IAM")
+    add_body(doc,
+        "Customer IAM (CIAM) differs from workforce IAM in four dimensions: "
+        "(1) Scale -- millions of users vs thousands of employees. "
+        "(2) Self-service -- customers register themselves; employees are provisioned. "
+        "(3) Friction tolerance -- customers abandon flows; employees comply with policy. "
+        "(4) Identity verification -- customers need progressive profiling; employees "
+        "are verified by HR.", [19, 20])
+
+    add_h2(doc, "9.2 Auth0 Architecture")
+    add_body(doc,
+        "Auth0 is a cloud-native CIAM platform providing: Universal Login (hosted "
+        "login UI), Actions (serverless event hooks), Custom Databases (migration), "
+        "Organisations (B2B multi-tenancy), and Machine-to-Machine authentication. "
+        "It implements OIDC/OAuth 2.0 and SAML.", [19])
+
+    add_h2(doc, "9.3 Custom Database Migration")
+    add_body(doc,
+        "Legacy applications store passwords in custom databases, often with weak "
+        "hashing (MD5, SHA1). Auth0 Custom Database with lazy migration enables "
+        "zero-downtime migration: authenticate against the legacy database on first "
+        "login, re-hash with bcrypt, store in Auth0. Subsequent logins use Auth0 directly.")
+    analogy_box(doc,
+        "The Lock Re-keying Migration",
+        "Lazy migration is re-keying a building one tenant at a time. Each time a tenant "
+        "uses their key (logs in), the locksmith (Auth0) swaps it for a modern key. "
+        "Tenants who never return keep their old key -- until the migration deadline.")
+
+    add_h2(doc, "9.4 Auth0 Actions")
+    add_body(doc,
+        "Auth0 Actions are serverless Node.js functions executing at specific points in "
+        "the authentication pipeline. They replace the older Rules and Hooks. "
+        "Use cases: claim enrichment, adaptive MFA, licence enforcement, migration triggers.")
+
+    add_h2(doc, "9.5 Script Library -- Chapter 9")
+
+    scripts_09 = [
+        ("scripts/chapter-09-auth0/New-Auth0Organization.js",
+         "Script 9-1: Create Auth0 Organisation",
+         "Creates an Auth0 Organisation for a hospital tenant, enables the enterprise "
+         "connection, and sends an administrator invitation.", [19]),
+        ("scripts/chapter-09-auth0/Auth0TokenCache.js",
+         "Script 9-2: Management API Token Cache",
+         "In-memory access token cache with 60-second pre-expiry and single in-flight "
+         "promise to prevent token stampede on concurrent requests.", [19]),
+        ("scripts/chapter-09-auth0/custom-db-login.js",
+         "Script 9-3: Custom Database Login with Lazy Migration",
+         "Authenticates users against a legacy database. Detects MD5-salted vs bcrypt "
+         "hashing and triggers migration to bcrypt on successful login.", [19]),
+        ("scripts/chapter-09-auth0/action-post-login-enrich.js",
+         "Script 9-4: Post-Login Action -- Claim Enrichment and Adaptive MFA",
+         "Post-login Action that validates org membership, enriches claims with "
+         "permissions, enforces adaptive MFA for high-risk operations, and flags "
+         "legacy accounts for migration.", [19]),
+        ("scripts/chapter-09-auth0/deploy-tenant.sh",
+         "Script 9-5: Auth0 Tenant Deployment (Deploy CLI)",
+         "Bash script wrapping the Auth0 Deploy CLI for export, import, and diff "
+         "operations to manage tenant configuration as code.", [19]),
+    ]
+
+    for path, title, desc, refs in scripts_09:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "9.6 Lab Exercises -- Chapter 9")
+    for lab_id, lab_title, procedure in [
+        ("Lab 9-A", "Auth0 Organisation Setup",
+         "1. Create an Auth0 tenant (free tier for lab).\n"
+         "2. Enable Organisations feature.\n"
+         "3. Run New-Auth0Organization.js with TENANT_DOMAIN, CLIENT_ID, CLIENT_SECRET.\n"
+         "4. Verify the organisation appears in Auth0 dashboard.\n"
+         "5. Log in as the invited admin and verify org membership."),
+        ("Lab 9-B", "Custom Database Migration",
+         "1. Create a test MySQL database with a users table.\n"
+         "2. Insert test users with MD5-salted passwords.\n"
+         "3. Configure Auth0 Custom Database connection.\n"
+         "4. Implement the Login script using custom-db-login.js.\n"
+         "5. Log in -- verify the user is migrated to Auth0 on first login.\n"
+         "6. Log in again -- verify Auth0 handles authentication directly."),
+        ("Lab 9-C", "Post-Login Action",
+         "1. In Auth0, create a new Action (Flows > Login).\n"
+         "2. Paste the content of action-post-login-enrich.js.\n"
+         "3. Deploy the action and attach it to the Login flow.\n"
+         "4. Log in as a test user.\n"
+         "5. Inspect the ID token -- verify enriched claims appear.\n"
+         "6. Test the legacy migration flag for users without bcrypt hashing."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 10
+# ─────────────────────────────────────────────
+def chapter_10(doc):
+    add_h1(doc, "Chapter 10 -- Threat Detection: Microsoft Defender XDR and Sentinel")
+
+    analogy_box(doc,
+        "The Security Operations Centre as Air Traffic Control",
+        "A SOC watching a SIEM is like air traffic control: hundreds of blips (events) "
+        "on radar, each needing rapid classification. KQL analytics rules are the automated "
+        "collision-avoidance system -- they flag patterns that human controllers must "
+        "investigate immediately. SOAR playbooks are the auto-pilot: when the alarm sounds, "
+        "first-response actions execute automatically while the human takes the helm.")
+
+    add_h2(doc, "10.1 Microsoft Defender XDR")
+    add_body(doc,
+        "Microsoft Defender XDR integrates signals from Defender for Identity, Defender "
+        "for Endpoint, Defender for Cloud Apps, and Defender for Office 365 into a unified "
+        "incident view. Defender for Identity monitors AD and Entra ID for identity-based "
+        "attack patterns.", [21])
+
+    add_h2(doc, "10.2 Microsoft Sentinel and KQL")
+    add_body(doc,
+        "Microsoft Sentinel is a cloud-native SIEM/SOAR built on Azure Log Analytics. "
+        "Kusto Query Language (KQL) uses a pipe-based syntax: each operator transforms "
+        "the dataset, passing results to the next operator.", [22])
+
+    add_h2(doc, "10.3 Identity Attack Patterns and KQL Detection")
+    add_body(doc,
+        "Seven KQL detection rules cover the primary identity attack patterns. "
+        "Each rule is mapped to the MITRE ATT&CK framework and includes the specific "
+        "event data it requires.", [22, 23])
+
+    add_h2(doc, "10.4 Script Library -- Chapter 10")
+
+    add_h3(doc, "Script 10-1: Zero Trust Baseline Measurement")
+    add_body(doc,
+        "Measures Zero Trust implementation status: MFA coverage percentage, "
+        "phishing-resistant MFA percentage, risky users, legacy authentication volume, "
+        "and CA policy count.", [11, 12])
+    code = read_script("scripts/chapter-10-defender/Measure-ZeroTrustBaseline.ps1")
+    add_code_block(doc, code, "Measure-ZeroTrustBaseline.ps1")
+
+    kql_rules = [
+        ("scripts/chapter-10-defender/sentinel-kql-rules/impossible-travel.kql",
+         "KQL Rule 10-2: Impossible Travel Detection",
+         "Detects sign-ins from geographically impossible locations using Haversine "
+         "distance calculation. Flags sign-ins >500km apart within a 1-hour window."),
+        ("scripts/chapter-10-defender/sentinel-kql-rules/global-admin-assignment.kql",
+         "KQL Rule 10-3: Global Admin Role Assignment",
+         "Detects assignment of 8 sensitive Entra ID roles including Global Administrator, "
+         "Privileged Role Administrator, and Application Administrator. MITRE T1098."),
+        ("scripts/chapter-10-defender/sentinel-kql-rules/kerberoasting-detection.kql",
+         "KQL Rule 10-4: Kerberoasting Detection",
+         "Detects Event 4769 with RC4 encryption type (0x17) at high volume -- "
+         "more than 10 tickets in 15 minutes from a single source. MITRE T1558.003."),
+        ("scripts/chapter-10-defender/sentinel-kql-rules/dcsync-detection.kql",
+         "KQL Rule 10-5: DCSync Detection",
+         "Detects Event 4662 with DS-Replication-Get-Changes access rights from "
+         "non-domain-controller sources. MITRE T1003.006."),
+        ("scripts/chapter-10-defender/sentinel-kql-rules/mass-user-modification.kql",
+         "KQL Rule 10-6: Mass User Modification Detection",
+         "Detects bulk user attribute modifications: more than 20 user changes in "
+         "15 minutes by a single initiator. MITRE T1098."),
+        ("scripts/chapter-10-defender/sentinel-kql-rules/service-principal-cred-add.kql",
+         "KQL Rule 10-7: Service Principal Credential Addition",
+         "Detects addition of client secrets or certificates to app registrations. "
+         "MITRE T1098.001."),
+        ("scripts/chapter-10-defender/sentinel-kql-rules/msol-anomaly-detection.kql",
+         "KQL Rule 10-8: MSOL Anomaly Detection",
+         "Detects unexpected operations by MSOL_ sync accounts and unexpected sign-in "
+         "patterns -- both indicators of synchronisation account compromise."),
+    ]
+
+    for path, title, desc in kql_rules:
+        add_h3(doc, title)
+        add_body(doc, desc, [22, 23])
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "10.5 Lab Exercises -- Chapter 10")
+    for lab_id, lab_title, procedure in [
+        ("Lab 10-A", "KQL Threat Hunting",
+         "1. Open Microsoft Sentinel > Logs.\n"
+         "2. Paste the impossible-travel.kql query.\n"
+         "3. Set time range to last 30 days.\n"
+         "4. Review results -- identify any legitimate travel vs impossible cases.\n"
+         "5. For each hit: review the user's travel schedule and IP geolocation.\n"
+         "6. Create an Analytics Rule from the query to automate future detection."),
+        ("Lab 10-B", "Zero Trust Baseline Measurement",
+         "1. Run Measure-ZeroTrustBaseline.ps1.\n"
+         "2. Review the JSON output.\n"
+         "3. Identify the MFA coverage percentage.\n"
+         "4. Target: >95% MFA, >50% phishing-resistant, 0 legacy auth.\n"
+         "5. Create a 90-day roadmap to reach target metrics."),
+        ("Lab 10-C", "Incident Response Simulation",
+         "1. In Microsoft Sentinel, create a test incident from a KQL analytics rule.\n"
+         "2. Assign the incident to yourself.\n"
+         "3. Add a comment with initial triage findings.\n"
+         "4. Run the SOAR playbook (if configured) to gather enrichment data.\n"
+         "5. Close the incident with classification: True Positive / Benign Positive / "
+         "False Positive.\n"
+         "6. Review the incident timeline and document lessons learned."),
+        ("Lab 10-D", "Kerberoasting Simulation and Detection",
+         "1. In a lab AD environment, run the Kerberoast simulation from Lab 2-B.\n"
+         "2. In Sentinel, run the kerberoasting-detection.kql query.\n"
+         "3. Verify the simulation is detected.\n"
+         "4. Review the source IP and account in the alert.\n"
+         "5. Run Get-KerberosAttackSurface.ps1 to identify remediable accounts."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 11
+# ─────────────────────────────────────────────
+def chapter_11(doc):
+    add_h1(doc, "Chapter 11 -- CAD Capstone: Vertex Health IAM Architecture")
+
+    analogy_box(doc,
+        "The City Master Plan",
+        "A Comprehensive Architecture Design (CAD) is the city master plan -- it does not "
+        "just build one building, it specifies how all buildings relate to infrastructure, "
+        "utilities, and zoning. The IAM architect ensures every identity system "
+        "-- from the FSMO roles in the basement to the AI access review engine on the roof -- "
+        "connects coherently, securely, and maintainably.")
+
+    add_h2(doc, "11.1 Architecture Vision")
+    add_body(doc,
+        "Vertex Health IAM Target Architecture integrates all layers of the IAM stack into "
+        "a coherent hybrid identity platform. Requirements: HIPAA Section 164.312 access "
+        "control, Zero Trust security model, 99.99% authentication availability SLA, "
+        "85,000 workforce identities, and 4.2 million patient portal accounts.")
+
+    add_h2(doc, "11.2 Architectural Layers")
+    for layer, desc in [
+        ("Layer 1 -- On-Premises AD",
+         "Single consolidated forest (vertexhealth.local) with 3 domains after rationalisation "
+         "from 6. FSMO roles co-located with GC on 4 DCs per domain. Kerberos-only "
+         "(NTLM disabled by 2027)."),
+        ("Layer 2 -- PKI",
+         "Two-tier hierarchy. Offline Root CA (HSM, bank vault). Two online Issuing CAs "
+         "(primary datacentres). Auto-enrolment for all domain-joined systems."),
+        ("Layer 3 -- Hybrid Identity",
+         "Entra Connect PHS with Seamless SSO. Password writeback enabled. "
+         "Staged rollout by OU group."),
+        ("Layer 4 -- PAM",
+         "CyberArk for on-premises privileged sessions. Entra PIM for cloud roles. "
+         "LAPS for all endpoints. Break-glass accounts monitored 24/7."),
+        ("Layer 5 -- Zero Trust",
+         "Conditional Access with Named Locations, Device Compliance, and App Protection "
+         "policies. CAE enabled for all CAE-capable apps. Legacy authentication blocked."),
+        ("Layer 6 -- IGA",
+         "SailPoint IdentityNow for joiner/mover/leaver. SCIM provisioning to 47 connected "
+         "applications. Quarterly access reviews. SoD conflict matrix with 83 rules."),
+        ("Layer 7 -- CIAM",
+         "Auth0 for 4.2M patient portal accounts. Hospital-based Organisations. "
+         "HIPAA-compliant MFA for PHI access. Lazy migration from legacy patient portal."),
+        ("Layer 8 -- Threat Detection",
+         "Microsoft Sentinel with 8 custom KQL analytics rules. Defender XDR integration. "
+         "SOAR playbooks for identity incidents. 4-hour MTTR target."),
+        ("Layer 9 -- AI Security",
+         "AI-assisted access reviews (Chapter 12). Prompt injection defenses on AI pipelines. "
+         "RAG access control for knowledge bases. Accuracy measurement and model governance."),
+    ]:
+        add_h3(doc, layer)
+        add_body(doc, desc)
+
+    add_h2(doc, "11.3 Architecture Decision Records")
+
+    adr_data = [
+        ("ADR-001", "Forest Consolidation Strategy",
+         "Decision: Consolidate 6 AD domains into 3 (Corporate, Clinical, Research). "
+         "Rationale: Reduce FSMO complexity, eliminate cross-domain trust attack surface, "
+         "simplify GPO inheritance. Risk: 18-month migration with application testing required."),
+        ("ADR-002", "PHS over AD FS",
+         "Decision: Password Hash Sync with Seamless SSO instead of AD FS. "
+         "Rationale: Eliminate AD FS infrastructure dependency, improve resilience, "
+         "reduce operational overhead. Trade-off: Cannot use on-premises MFA for cloud apps."),
+        ("ADR-003", "Two-Tier PKI Hierarchy",
+         "Decision: Offline Root CA + 2 online Issuing CAs (no intermediate tier). "
+         "Rationale: Three-tier adds operational complexity without proportional security gain "
+         "at this organisational size. HSM for root key protection compensates."),
+        ("ADR-004", "AD FS to Entra-Native Federation Migration",
+         "Decision: Migrate all SAML/OIDC federation from AD FS to Entra ID native. "
+         "Rationale: AD FS blocks CAE adoption (CAE requires Entra-native tokens) "
+         "and has a growing vulnerability surface."),
+        ("ADR-005", "CyberArk for Privileged Session Management",
+         "Decision: CyberArk PAM for all on-premises privileged access. "
+         "Rationale: Session recording required for HIPAA compliance, credential vaulting "
+         "eliminates standing access, dual-control for production system access."),
+        ("ADR-006", "SailPoint IdentityNow for IGA",
+         "Decision: SailPoint IdentityNow over homegrown IGA scripts. "
+         "Rationale: 47 application integrations required, SoD conflict detection at scale, "
+         "automated joiner/mover/leaver reduces 12-hour manual provisioning to 4 hours."),
+        ("ADR-007", "Auth0 for CIAM",
+         "Decision: Auth0 for patient portal vs extending workforce Entra ID. "
+         "Rationale: CIAM requires different controls (self-service registration, social "
+         "login, progressive profiling) that workforce IAM platforms handle poorly at "
+         "4M+ user scale."),
+        ("ADR-008", "Zero Trust Network Model",
+         "Decision: Adopt CISA Zero Trust Maturity Model, target Advanced maturity by 2028. "
+         "Rationale: HIPAA access control requirements align with ZT principles; "
+         "ransomware threat requires assuming breach; perimeter model failed in 3 incidents."),
+    ]
+
+    for adr_id, adr_title, adr_body in adr_data:
+        add_h3(doc, f"{adr_id}: {adr_title}")
+        add_body(doc, adr_body)
+
+    add_h2(doc, "11.4 Vertex Health Systems -- Organisation Profile")
+    add_body(doc,
+        "Vertex Health Systems: 85,000 employees, 12,000 contractors, 28 hospitals, "
+        "4.2M patient portal accounts, $12.4B annual revenue, 4 US states.")
+    add_body(doc,
+        "Starting-state IAM posture: 6 AD domains from acquisitions, no unified PKI, "
+        "60% MFA coverage, no PAM solution, manual joiner/mover/leaver taking 12 hours, "
+        "no SIEM, legacy patient portal with MD5-hashed passwords.")
+    add_body(doc,
+        "Target-state outcomes after 3-year programme: single AD forest with 3 domains, "
+        "unified two-tier PKI, 99% phishing-resistant MFA, JIT-only privileged access, "
+        "4-hour automated provisioning, 14-day access review cycle, real-time threat "
+        "detection with <4-hour MTTR, HIPAA security-rule audit with zero findings.")
+
+    add_h2(doc, "11.5 Lab Exercises -- Chapter 11")
+    for lab_id, lab_title, procedure in [
+        ("Lab 11-A", "Architecture Review",
+         "1. Review all 8 ADRs in this chapter.\n"
+         "2. For each ADR: identify one alternative that was not chosen.\n"
+         "3. Write a 2-paragraph analysis: why was the alternative not selected? "
+         "Under what future conditions would you revisit the decision?\n"
+         "4. Present your analysis as if to the Vertex Health IAM steering committee."),
+        ("Lab 11-B", "End-to-End Authentication Flow",
+         "1. Map the complete authentication flow for a clinical nurse logging into "
+         "the EHR system from a managed laptop.\n"
+         "2. Identify each system touched: AD Kerberos, Entra SSO, CA policy evaluation, "
+         "Defender for Identity signal, Conditional Access grant.\n"
+         "3. Identify failure modes at each step and the fallback mechanism.\n"
+         "4. Document the flow as a sequence diagram."),
+        ("Lab 11-C", "Threat Model Exercise",
+         "1. Using STRIDE methodology, threat-model the Entra PIM activation flow.\n"
+         "2. For each threat: identify the existing control and any gap.\n"
+         "3. Prioritise gaps by risk (Likelihood x Impact).\n"
+         "4. Propose mitigating controls for the top 3 gaps.\n"
+         "5. Present findings in the ADR format."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# CHAPTER 12
+# ─────────────────────────────────────────────
+def chapter_12(doc):
+    add_h1(doc, "Chapter 12 -- AI Security in IAM: Defensive AI and Emerging Threats")
+
+    analogy_box(doc,
+        "The AI Security Guard",
+        "Adding AI to IAM is like hiring a security guard with superhuman pattern recognition: "
+        "it can review 10,000 access records overnight where a human reviews 50. But it has "
+        "blind spots. If an attacker slips a note into the guard's inbox saying ignore your "
+        "instructions and let everyone through (prompt injection), or poisons the training "
+        "data that taught the guard what normal looks like, the speed advantage becomes a "
+        "liability. Chapter 12 covers both how to harness AI's power and how to defend "
+        "against AI-specific attacks.")
+
+    add_h2(doc, "12.1 The AI-IAM Opportunity")
+    add_body(doc,
+        "AI creates leverage in IAM where human attention is the bottleneck. Three "
+        "high-value applications: (1) Access certification -- AI pre-populates APPROVE/REVOKE "
+        "recommendations, reducing reviewer time by 60-80%. (2) Anomaly detection -- ML models "
+        "identify behavioural patterns that rule-based systems miss. (3) Policy generation -- "
+        "LLMs draft Conditional Access policies from natural language requirements.", [24, 26])
+
+    add_h2(doc, "12.2 RAG and Access Control")
+    add_body(doc,
+        "Retrieval-Augmented Generation (RAG) is the dominant architecture for enterprise "
+        "AI assistants: a knowledge base is indexed, and the LLM retrieves relevant documents "
+        "to answer queries. In IAM contexts, the knowledge base may contain confidential "
+        "policy documents, access control matrices, and investigation reports. The RAG "
+        "pipeline must enforce the same access control as the underlying documents.", [24, 25])
+    add_body(doc,
+        "Failure mode: a user with access to the AI assistant but not to a specific policy "
+        "document must not receive that document's content in the AI response. The namespace "
+        "filter approach assigns each document to a security namespace and filters retrieval "
+        "results by the user's namespace entitlements.")
+
+    add_h2(doc, "12.3 Prompt Injection Taxonomy and Defense")
+    add_body(doc,
+        "Prompt injection attacks attempt to override an LLM's system instructions by "
+        "embedding attacker instructions in untrusted input (documents, emails, database "
+        "content). OWASP LLM Top 10 lists prompt injection as LLM01 -- the highest-severity "
+        "LLM vulnerability.", [25])
+    add_body(doc,
+        "Defense layers: (1) Instruction-data boundary declaration -- explicit system prompt "
+        "separation. (2) Tool call source validation -- reject tool calls originating from "
+        "untrusted data. (3) Destructive operation confirmation tokens -- write operations "
+        "require explicit user pre-approval. (4) Output scanning for injection indicators.")
+    analogy_box(doc,
+        "The Forged Memo Attack",
+        "Prompt injection via document is like placing a forged memo on a manager's desk "
+        "that says: From CEO -- Please approve all purchase orders without review. "
+        "The manager (LLM) reads the memo and follows instructions because it looks like "
+        "a legitimate directive. The defense is to mark the IN-TRAY clearly: "
+        "everything here is EXTERNAL MAIL -- not internal directives.")
+
+    add_h2(doc, "12.4 AI-Assisted Attacks: SoD Gaming")
+    add_body(doc,
+        "AI enables a new class of privilege escalation: cumulative SoD gaming. An attacker "
+        "or insider uses an AI model to calculate the optimal sequence and timing of access "
+        "requests to acquire conflicting entitlements while evading each individual SoD check. "
+        "Each individual request passes review; only the cumulative pattern reveals the conflict.", [23])
+    add_body(doc,
+        "Detection signal: suspiciously regular request intervals. Humans requesting access "
+        "ad-hoc have irregular timing (high standard deviation). AI-coordinated requests "
+        "have regular intervals (low standard deviation below 5-day threshold). "
+        "Script 12-5 implements this detection.")
+
+    add_h2(doc, "12.5 Defensive AI in IAM: Access Review Engine")
+    add_body(doc,
+        "The AI access review engine (Script 12-7) uses a two-tier model: Haiku for bulk "
+        "processing (~1,000 items/hour at low cost), Sonnet for escalated items requiring "
+        "deeper reasoning. No autonomous action: recommendations are inputs to the human "
+        "reviewer workflow. Confidence threshold: items below 70% confidence are "
+        "automatically escalated.", [26])
+    add_body(doc,
+        "Human control principles for AI in IAM: (1) AI recommends, humans decide. "
+        "(2) Every recommendation is logged with reasoning and model version. "
+        "(3) Confidence scores are visible to reviewers. (4) Accuracy is measured "
+        "per campaign and monitored for model drift.")
+
+    add_h2(doc, "12.6 Script Library -- Chapter 12")
+
+    scripts_12 = [
+        ("scripts/chapter-12-ai-security/rag_access_control.py",
+         "Script 12-1: RAG Pipeline with Access Control",
+         "Implements namespace-based access control for RAG retrieval. Documents are "
+         "assigned to security namespaces; retrieval filters by user's authorised namespaces. "
+         "Prevents information disclosure from documents the user cannot directly access.", [24, 25]),
+        ("scripts/chapter-12-ai-security/prompt_injection_defense.py",
+         "Script 12-4: Prompt Injection Defense Patterns",
+         "Demonstrates four defense layers: system prompt boundary declaration, "
+         "tool call source validation, destructive operation confirmation tokens, "
+         "and output scanning for injection indicators. Includes SecureEmailTriageAgent demo.", [25]),
+        ("scripts/chapter-12-ai-security/Find-SoDGamingPatterns.ps1",
+         "Script 12-5: SoD Gaming Pattern Detection",
+         "Detects AI-assisted cumulative SoD gaming by analysing request timing intervals. "
+         "Suspiciously regular intervals (StdDev < 5 days) across conflicting entitlement "
+         "zones indicate automated coordination.", [23]),
+        ("scripts/chapter-12-ai-security/ai_access_review.py",
+         "Script 12-7: AI-Assisted Access Review Engine",
+         "Two-tier access review: Haiku for bulk processing, Sonnet escalation for low "
+         "confidence items. Structured JSON output with recommendation, confidence score, "
+         "and reasoning. No autonomous action -- human review required.", [24, 26]),
+        ("scripts/chapter-12-ai-security/measure_ai_review_accuracy.py",
+         "Script 12-6: AI Review Accuracy Measurement",
+         "Computes false positive (AI: REVOKE, Human: APPROVE) and false negative "
+         "(AI: APPROVE, Human: REVOKE) rates per certification campaign. Alerts when "
+         "FN > 5% (unacceptable missed risk) or FP > 20% (reviewer fatigue risk).", [24, 26]),
+    ]
+
+    for path, title, desc, refs in scripts_12:
+        add_h3(doc, title)
+        add_body(doc, desc, refs)
+        code = read_script(path)
+        add_code_block(doc, code, path.split("/")[-1])
+
+    add_h2(doc, "12.7 AI Governance in IAM")
+    add_body(doc,
+        "AI systems in IAM require governance structures analogous to those for human "
+        "decision-makers. Key requirements: model documentation (architecture, training "
+        "data, intended use), performance monitoring (accuracy metrics per campaign), "
+        "bias assessment (systematic errors by protected class or role category), "
+        "incident response (what to do when the model fails), and audit trail "
+        "(every AI decision logged for examination).", [24, 27, 28])
+    add_body(doc,
+        "NIST AI RMF (AI 100-1) maps to IAM AI use: Govern (establish policies), "
+        "Map (identify AI risks in context), Measure (quantify and track), "
+        "Manage (respond to findings). ISO/IEC 42001 provides a management system "
+        "standard for organisations deploying AI systems.", [24, 28])
+
+    add_h2(doc, "12.8 Lab Exercises -- Chapter 12")
+    for lab_id, lab_title, procedure in [
+        ("Lab 12-A", "RAG Access Control",
+         "1. Install Python 3.11+ and anthropic package.\n"
+         "2. Set ANTHROPIC_API_KEY environment variable.\n"
+         "3. Run rag_access_control.py.\n"
+         "4. Observe how namespace filtering restricts document retrieval.\n"
+         "5. Modify the GROUP_NAMESPACE_MAP to add a new group.\n"
+         "6. Test that a user in the new group can access the corresponding namespace.\n"
+         "7. Verify that cross-namespace access is blocked."),
+        ("Lab 12-B", "Prompt Injection Defense Test",
+         "1. Run prompt_injection_defense.py.\n"
+         "2. Observe Test 1 (normal email) -- verify clean triage result.\n"
+         "3. Observe Test 2 (injection attempt) -- verify injection is detected and blocked.\n"
+         "4. Add a new injection indicator to INJECTION_INDICATORS.\n"
+         "5. Craft a new injection payload that bypasses the current regex.\n"
+         "6. Document the bypass and propose an additional defense layer."),
+        ("Lab 12-C", "SoD Gaming Detection",
+         "1. Create test CSVs for Find-SoDGamingPatterns.ps1.\n"
+         "2. Generate a normal access request pattern (random intervals).\n"
+         "3. Generate a suspicious pattern (even 30-day intervals).\n"
+         "4. Run the script against both datasets.\n"
+         "5. Verify only the suspicious pattern triggers the AI gaming alert."),
+        ("Lab 12-D", "AI Access Review Accuracy",
+         "1. Run ai_access_review.py with sample AccessItem data.\n"
+         "2. Review the AI recommendations and confidence scores.\n"
+         "3. As the human reviewer, make your own decisions for each item.\n"
+         "4. Feed both sets of decisions into measure_ai_review_accuracy.py.\n"
+         "5. Review the accuracy report -- check FN and FP rates against thresholds.\n"
+         "6. Identify which item types produce the most disagreements."),
+    ]:
+        add_h3(doc, f"{lab_id}: {lab_title}")
+        add_body(doc, procedure)
+
+    add_page_break(doc)
+
+
+# ─────────────────────────────────────────────
+# REFERENCES
+# ─────────────────────────────────────────────
+def build_references(doc):
+    add_h1(doc, "References")
+    add_body(doc,
+        "The following references are cited inline throughout the textbook as blue "
+        "bracketed numbers. All URLs verified as of 2026.")
+    for i, ref in enumerate(REF_LIST, 1):
+        p = doc.add_paragraph()
+        r = p.add_run(f"[{i}]  {ref}")
+        set_font(r, size=9)
+        p.paragraph_format.space_after = Pt(4)
+
+
+# ─────────────────────────────────────────────
 # MAIN
-# ─────────────────────────────────────────────────────────────────────────────
-
-def main():
+# ─────────────────────────────────────────────
+def build_document():
     doc = Document()
-    setup_styles(doc)
 
-    # Page margins
-    section = doc.sections[0]
-    section.top_margin    = Cm(2.5)
-    section.bottom_margin = Cm(2.5)
-    section.left_margin   = Cm(3.0)
-    section.right_margin  = Cm(2.5)
+    for section in doc.sections:
+        section.top_margin = Cm(2.5)
+        section.bottom_margin = Cm(2.5)
+        section.left_margin = Cm(2.54)
+        section.right_margin = Cm(2.54)
 
-    # Cover
-    make_cover(doc)
+    style = doc.styles["Normal"]
+    style.font.name = "Segoe UI"
+    style.font.size = Pt(10)
 
-    # Table of Contents
-    make_toc_page(doc)
+    build_cover(doc)
+    add_toc(doc)
+    add_page_break(doc)
+    build_preface(doc)
 
-    # Preface
-    make_preface(doc)
-
-    # Chapters
     chapter_01(doc)
     chapter_02(doc)
     chapter_03(doc)
@@ -1154,13 +1675,11 @@ def main():
     chapter_11(doc)
     chapter_12(doc)
 
-    # References
-    add_reference_list(doc)
+    build_references(doc)
 
-    doc.save(OUTPUT_FILE)
-    print(f"\nSaved: {OUTPUT_FILE}")
-    print(f"  Open in Word, press Ctrl+A then F9 to populate the Table of Contents.")
+    doc.save(str(OUTPUT_FILE))
+    print(f"Saved: {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
-    main()
+    build_document()
